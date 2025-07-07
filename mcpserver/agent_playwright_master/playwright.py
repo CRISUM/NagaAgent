@@ -362,6 +362,7 @@ class PlaywrightAgent(Agent):
                         if not url.startswith(('http://', 'https://')):
                             url = 'https://' + url  #
                         result = await controller.open_url(url, timeout=timeout, wait_until=wait_until)  #
+<<<<<<< HEAD
                         response = {
                             'status': 'ok' if result == 'ok' else 'error',
                             'message': result if result != 'ok' else '打开成功',
@@ -395,6 +396,41 @@ class PlaywrightAgent(Agent):
                                 'selector': selector
                             }
                         }
+=======
+                    response = {
+                        'status': 'ok' if result == 'ok' else 'error',
+                        'message': result if result != 'ok' else '打开成功',
+                        'query': query if query else url,
+                        'data': {
+                                'url': url,
+                                'page_title': await computer.page.title(),
+                                'page_content_length': len(await computer.page.content())
+                        }
+                    }
+                        return json.dumps(response, ensure_ascii=False)  #
+            if action == "type" and selector and text is not None:
+                        result = await controller.type(selector, text)  #
+                    response = {
+                        'status': 'ok' if result == 'ok' else 'error',
+                        'message': result if result == 'ok' else f'输入失败: {result}',
+                        'query': query,
+                        'data': {
+                            'selector': selector,
+                            'text': text
+                        }
+                    }
+                        return json.dumps(response, ensure_ascii=False)  #
+            if action == "click" and selector:
+                        result = await controller.click(selector)  #
+                    response = {
+                        'status': 'ok' if result == 'ok' else 'error',
+                        'message': result if result == 'ok' else f'点击失败: {result}',
+                        'query': query,
+                        'data': {
+                            'selector': selector
+                        }
+                    }
+>>>>>>> 546f2ce (playwright升级中)
                         return json.dumps(response, ensure_ascii=False)  #
             # 观察类action #
             if action in ["get_content", "get_title", "get_screenshot"]:

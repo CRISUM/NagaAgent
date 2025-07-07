@@ -1,30 +1,30 @@
-import logging,os,asyncio # 日志与系统
+import logging
+import os
+# import asyncio # 日志与系统
 from datetime import datetime # 时间
-from config import LOG_DIR, DEEPSEEK_API_KEY, DEEPSEEK_MODEL, TEMPERATURE, MAX_TOKENS, get_current_datetime, DEEPSEEK_BASE_URL, NAGA_SYSTEM_PROMPT, VOICE_ENABLED, GRAG_ENABLED # 配置
-from mcpserver.mcp_manager import get_mcp_manager, remove_tools_filter, HandoffInputData # 多功能管理
+from mcpserver.mcp_manager import get_mcp_manager # 多功能管理
 from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX # handoff提示词
-from mcpserver.agent_playwright_master import PlaywrightAgent, extract_url # 导入浏览器相关类
+# from mcpserver.agent_playwright_master import ControllerAgent, BrowserAgent, ContentAgent # 导入浏览器相关类
 from openai import OpenAI,AsyncOpenAI # LLM
-import difflib # 模糊匹配
-import sys,json,traceback
+# import difflib # 模糊匹配
+import sys
+import json
+import traceback
 import time # 时间戳打印
 from mcpserver.mcp_registry import register_all_handoffs # 导入批量注册方法
-from voice.tts_handler import generate_speech, get_models, get_voices # TTS功能
-import config
-import asyncio
-import json
 import websockets 
 import re # 添加re模块导入
 from typing import List, Dict # 修复List未导入
 from thinking import TreeThinkingEngine # 树状思考引擎
 from thinking.config import COMPLEX_KEYWORDS # 复杂关键词
+from config import config
+from mcpserver.dynamic_agent_registry import dynamic_registry # 动态注册系统
 
 # GRAG记忆系统导入
-if GRAG_ENABLED:
+if config.grag.enabled:
     try:
         from summer_memory.memory_manager import memory_manager
-        logger = logging.getLogger("NagaConversation")
-        logger.info("夏园记忆系统已加载")
+
     except Exception as e:
         logger = logging.getLogger("NagaConversation")
         logger.error(f"夏园记忆系统加载失败: {e}")
@@ -32,42 +32,69 @@ if GRAG_ENABLED:
 else:
     memory_manager = None
 
-now=lambda:time.strftime('%H:%M:%S:')+str(int(time.time()*1000)%10000) # 当前时间
+def now():
+    return time.strftime('%H:%M:%S:')+str(int(time.time()*1000)%10000) # 当前时间
 _builtin_print=print
-print=lambda *a,**k:sys.stderr.write('[print] '+(' '.join(map(str,a)))+'\n')
+def print(*a, **k):
+    return sys.stderr.write('[print] '+(' '.join(map(str,a)))+'\n')
 
-# 配置日志
+# 配置日志 - 使用统一配置系统的日志级别
+log_level = getattr(logging, config.system.log_level.upper(), logging.INFO)
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stderr)
     ]
 )
+
+# 特别设置httpcore和openai的日志级别，减少连接异常噪音
+logging.getLogger("httpcore.connection").setLevel(logging.WARNING)
+logging.getLogger("openai._base_client").setLevel(logging.WARNING)
+# 隐藏动态注册系统的DEBUG日志
+logging.getLogger("mcpserver.dynamic_agent_registry").setLevel(logging.WARNING)
+# 隐藏asyncio的DEBUG日志
+logging.getLogger("asyncio").setLevel(logging.WARNING)
 logger = logging.getLogger("NagaConversation")
 
 _MCP_HANDOFF_REGISTERED=False
+_TREE_THINKING_SUBSYSTEMS_INITIALIZED=False
+_DYNAMIC_REGISTRY_INITIALIZED=False
 
 class NagaConversation: # 对话主类
     def __init__(self):
         self.mcp = get_mcp_manager()
         self.messages = []
         self.dev_mode = False
-        self.client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL.rstrip('/') + '/')
-        self.async_client = AsyncOpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL.rstrip('/') + '/')
+        self.client = OpenAI(api_key=config.api.api_key, base_url=config.api.base_url.rstrip('/') + '/')
+        self.async_client = AsyncOpenAI(api_key=config.api.api_key, base_url=config.api.base_url.rstrip('/') + '/')
         
-        # 初始化GRAG记忆系统
+        # 初始化动态注册系统
+        self._init_dynamic_registry()
+        
+        # 初始化GRAG记忆系统（只在首次初始化时显示日志）
         self.memory_manager = memory_manager
-        if self.memory_manager:
+        if self.memory_manager and not hasattr(self.__class__, '_memory_initialized'):
             logger.info("夏园记忆系统已初始化")
+            self.__class__._memory_initialized = True
         
-        # 集成树状思考系统
-        try:
-            self.tree_thinking = TreeThinkingEngine(api_client=self, memory_manager=self.memory_manager)
-            logger.info("树状外置思考系统初始化成功")
-        except Exception as e:
-            logger.warning(f"树状思考系统初始化失败: {e}")
-            self.tree_thinking = None
+        # 集成树状思考系统（参考handoff的全局变量保护机制）
+        global _TREE_THINKING_SUBSYSTEMS_INITIALIZED
+        if not _TREE_THINKING_SUBSYSTEMS_INITIALIZED:
+            try:
+                self.tree_thinking = TreeThinkingEngine(api_client=self, memory_manager=self.memory_manager)
+                print("[TreeThinkingEngine] ✅ 树状外置思考系统初始化成功")
+                _TREE_THINKING_SUBSYSTEMS_INITIALIZED = True
+            except Exception as e:
+                logger.warning(f"树状思考系统初始化失败: {e}")
+                self.tree_thinking = None
+        else:
+            # 如果子系统已经初始化过，创建新实例但不重新初始化子系统（静默处理）
+            try:
+                self.tree_thinking = TreeThinkingEngine(api_client=self, memory_manager=self.memory_manager)
+            except Exception as e:
+                logger.warning(f"树状思考系统实例创建失败: {e}")
+                self.tree_thinking = None
         
         global _MCP_HANDOFF_REGISTERED
         if not _MCP_HANDOFF_REGISTERED:
@@ -80,36 +107,85 @@ class NagaConversation: # 对话主类
                 logger.error(f"注册Agent handoff处理器失败: {e}")
                 traceback.print_exc(file=sys.stderr)
 
-    async def _init_websocket(self):
-        """初始化WebSocket管理器"""
+    def _init_dynamic_registry(self):
+        """初始化动态注册系统"""
+        global _DYNAMIC_REGISTRY_INITIALIZED
+        if _DYNAMIC_REGISTRY_INITIALIZED:
+            logger.debug("动态注册系统已初始化，跳过重复初始化")
+            return
+            
+        import asyncio
         try:
-            await self.mcp.initialize_websocket(host='127.0.0.1', port=8081)
-            logger.info("WebSocket管理器初始化完成")
+            # 检查是否已有事件循环
+            try:
+                loop = asyncio.get_running_loop()
+                # 如果已有事件循环，使用create_task
+                loop.create_task(dynamic_registry.discover_agents())
+            except RuntimeError:
+                # 如果没有事件循环，创建新的
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(dynamic_registry.discover_agents())
+                loop.close()
+            logger.info("动态注册系统初始化完成")
+            _DYNAMIC_REGISTRY_INITIALIZED = True
         except Exception as e:
-            logger.error(f"WebSocket管理器初始化失败: {e}")
+            logger.error(f"动态注册系统初始化失败: {e}")
 
     def save_log(self, u, a):  # 保存对话日志
         if self.dev_mode:
             return  # 开发者模式不写日志
         d = datetime.now().strftime('%Y-%m-%d')
         t = datetime.now().strftime('%H:%M:%S')
-        f = os.path.join(LOG_DIR, f'{d}.txt')
+        
+        # 确保日志目录存在
+        log_dir = config.system.log_dir
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir, exist_ok=True)
+            logger.info(f"已创建日志目录: {log_dir}")
+        
+        f = os.path.join(log_dir, f'{d}.txt')
         with open(f, 'a', encoding='utf-8') as w:
-            w.write(f'-'*50 + f'\n时间: {d} {t}\n用户: {u}\n娜迦: {a}\n\n')
+            w.write('-'*50 + f'\n时间: {d} {t}\n用户: {u}\n娜迦: {a}\n\n')
 
     async def _call_llm(self, messages: List[Dict]) -> Dict:
         """调用LLM API"""
-        resp = await self.async_client.chat.completions.create(
-            model=DEEPSEEK_MODEL, 
-            messages=messages, 
-            temperature=TEMPERATURE, 
-            max_tokens=MAX_TOKENS, 
-            stream=False  # 工具调用循环中不使用流式
-        )
-        return {
-            'content': resp.choices[0].message.content,
-            'status': 'success'
-        }
+        try:
+            resp = await self.async_client.chat.completions.create(
+                model=config.api.model, 
+                messages=messages, 
+                temperature=config.api.temperature, 
+                max_tokens=config.api.max_tokens, 
+                stream=False  # 工具调用循环中不使用流式
+            )
+            return {
+                'content': resp.choices[0].message.content,
+                'status': 'success'
+            }
+        except RuntimeError as e:
+            if "handler is closed" in str(e):
+                logger.debug(f"忽略连接关闭异常: {e}")
+                # 重新创建客户端并重试
+                self.async_client = AsyncOpenAI(api_key=config.api.api_key, base_url=config.api.base_url.rstrip('/') + '/')
+                resp = await self.async_client.chat.completions.create(
+                    model=config.api.model, 
+                    messages=messages, 
+                    temperature=config.api.temperature, 
+                    max_tokens=config.api.max_tokens, 
+                    stream=False
+                )
+                return {
+                    'content': resp.choices[0].message.content,
+                    'status': 'success'
+                }
+            else:
+                raise
+        except Exception as e:
+            logger.error(f"LLM API调用失败: {e}")
+            return {
+                'content': f"API调用失败: {str(e)}",
+                'status': 'error'
+            }
 
     # 工具调用循环相关方法
     def _parse_tool_calls(self, content: str) -> list:
@@ -160,7 +236,7 @@ class NagaConversation: # 对话主类
     async def handle_tool_call_loop(self, messages: List[Dict], is_streaming: bool = False) -> Dict:
         """处理工具调用循环"""
         recursion_depth = 0
-        max_recursion = int(os.getenv('MaxhandoffLoopStream', '5')) if is_streaming else int(os.getenv('MaxhandoffLoopNonStream', '5'))
+        max_recursion = config.handoff.max_loop_stream if is_streaming else config.handoff.max_loop_non_stream
         current_messages = messages.copy()
         current_ai_content = ''
         while recursion_depth < max_recursion:
@@ -191,7 +267,6 @@ class NagaConversation: # 对话主类
         return text_stream()
 
     async def process(self, u, is_voice_input=False):  # 添加is_voice_input参数
-        import json  # 保证json在本地作用域可用
         try:
             # 开发者模式优先判断
             if u.strip() == "#devmode":
@@ -204,18 +279,18 @@ class NagaConversation: # 对话主类
                 print(f"开始处理用户输入：{now()}")  # 语音转文本结束，开始处理
             
             # GRAG记忆查询
-            memory_context = ""
+            # memory_context = ""
             if self.memory_manager:
                 try:
                     memory_result = await self.memory_manager.query_memory(u)
                     if memory_result:
-                        memory_context = f"\n[记忆检索结果]: {memory_result}\n"
+                        # memory_context = f"\n[记忆检索结果]: {memory_result}\n"
                         logger.info("从GRAG记忆中检索到相关信息")
                 except Exception as e:
                     logger.error(f"GRAG记忆查询失败: {e}")
             
             # 添加handoff提示词
-            system_prompt = f"{RECOMMENDED_PROMPT_PREFIX}\n{NAGA_SYSTEM_PROMPT}"
+            system_prompt = f"{RECOMMENDED_PROMPT_PREFIX}\n{config.prompts.naga_system_prompt}"
             sysmsg = {"role": "system", "content": system_prompt.format(available_mcp_services=self.mcp.format_available_services())}  # 直接使用系统提示词
             msgs = [sysmsg] if sysmsg else []
             msgs += self.messages[-20:] + [{"role": "user", "content": u}]
@@ -225,20 +300,25 @@ class NagaConversation: # 对话主类
             # 树状思考系统控制指令
             if u.strip().startswith("#tree"):
                 if self.tree_thinking is None:
-                    yield ("娜迦", "树状思考系统未初始化，无法使用该功能");return
+                    yield ("娜迦", "树状思考系统未初始化，无法使用该功能")
+                    return
                 command = u.strip().split()
                 if len(command) == 2:
                     if command[1] == "on":
                         self.tree_thinking.enable_tree_thinking(True)
-                        yield ("娜迦", "🌳 树状外置思考系统已启用");return
+                        yield ("娜迦", "🌳 树状外置思考系统已启用")
+                        return
                     elif command[1] == "off":
                         self.tree_thinking.enable_tree_thinking(False)
-                        yield ("娜迦", "树状思考系统已禁用，恢复普通对话模式");return
+                        yield ("娜迦", "树状思考系统已禁用，恢复普通对话模式")
+                        return
                     elif command[1] == "status":
                         status = self.tree_thinking.get_system_status()
                         enabled_status = "启用" if status["enabled"] else "禁用"
-                        yield ("娜迦", f"🌳 树状思考系统状态：{enabled_status}\n当前会话：{status['current_session']}\n历史会话数：{status['total_sessions']}");return
-                yield ("娜迦", "用法：#tree on/off/status");return
+                        yield ("娜迦", f"🌳 树状思考系统状态：{enabled_status}\n当前会话：{status['current_session']}\n历史会话数：{status['total_sessions']}")
+                        return
+                yield ("娜迦", "用法：#tree on/off/status")
+                return
             
             # 检查是否需要自动触发树状思考
             tree_thinking_enabled = False
@@ -261,7 +341,7 @@ class NagaConversation: # 对话主类
                     if thinking_result and "answer" in thinking_result:
                         process_info = thinking_result.get("thinking_process", {})
                         difficulty = process_info.get("difficulty", {})
-                        yield ("娜迦", f"\n🧠 深度思考完成：")
+                        yield ("娜迦", "\n🧠 深度思考完成：")
                         yield ("娜迦", f"• 问题难度：{difficulty.get('difficulty', 'N/A')}/5")
                         yield ("娜迦", f"• 思考路线：{process_info.get('routes_generated', 0)}条 → {process_info.get('routes_selected', 0)}条")
                         yield ("娜迦", f"• 处理时间：{process_info.get('processing_time', 0):.2f}秒")
@@ -314,7 +394,8 @@ class NagaConversation: # 对话主类
 
             return
         except Exception as e:
-            import sys, traceback
+            import sys
+            import traceback
             traceback.print_exc(file=sys.stderr)
             yield ("娜迦", f"[MCP异常]: {e}")
             return
@@ -323,18 +404,33 @@ class NagaConversation: # 对话主类
         """为树状思考系统等提供API调用接口""" # 统一接口
         try:
             response = await self.async_client.chat.completions.create(
-                model=DEEPSEEK_MODEL,
+                model=config.api.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
-                max_tokens=MAX_TOKENS
+                max_tokens=config.api.max_tokens
             )
             return response.choices[0].message.content
+        except RuntimeError as e:
+            if "handler is closed" in str(e):
+                logger.debug(f"忽略连接关闭异常，重新创建客户端: {e}")
+                # 重新创建客户端并重试
+                self.async_client = AsyncOpenAI(api_key=config.api.api_key, base_url=config.api.base_url.rstrip('/') + '/')
+                response = await self.async_client.chat.completions.create(
+                    model=config.api.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=temperature,
+                    max_tokens=config.api.max_tokens
+                )
+                return response.choices[0].message.content
+            else:
+                logger.error(f"API调用失败: {e}")
+                return f"API调用出错: {str(e)}"
         except Exception as e:
             logger.error(f"API调用失败: {e}")
             return f"API调用出错: {str(e)}"
 
 async def process_user_message(s,msg):
-    if VOICE_ENABLED and not msg: #无文本输入时启动语音识别
+    if config.system.voice_enabled and not msg: #无文本输入时启动语音识别
         async for text in s.voice.stt_stream():
             if text:
                 msg=text
@@ -344,8 +440,8 @@ async def process_user_message(s,msg):
 
 async def send_ai_message(s, msg):
     # 启用语音时，通过WebSocket流式推送到voice/genVoice服务
-    if config.VOICE_ENABLED:
-        ws_url = f"ws://127.0.0.1:{config.TTS_PORT}/genVoice"  # WebSocket服务地址
+    if config.system.voice_enabled:
+        ws_url = f"ws://127.0.0.1:{config.tts.port}/genVoice"  # WebSocket服务地址
         try:
             async with websockets.connect(ws_url) as websocket:
                 await websocket.send(msg)  # 发送文本到TTS服务

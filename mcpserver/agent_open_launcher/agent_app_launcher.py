@@ -3,6 +3,7 @@ import os
 import platform
 import subprocess
 import asyncio
+import json
 from .app_cache import get_cached_apps, preload_apps  # 应用缓存模块
 from .app_name_matcher import find_best_app, update_alias
 
@@ -84,3 +85,30 @@ class AppLauncherAgent(object):
         )
         args = task.get("args")
         return self.run(action, app, args)
+
+# 工厂函数：动态创建Agent实例
+def create_app_launcher_agent():
+    """创建AppLauncherAgent实例"""
+    return AppLauncherAgent()
+
+# 获取Agent元数据
+def get_agent_metadata():
+    """获取Agent元数据"""
+    import os
+    manifest_path = os.path.join(os.path.dirname(__file__), "agent-manifest.json")
+    try:
+        with open(manifest_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"加载元数据失败: {e}")
+        return None
+
+# 验证配置
+def validate_agent_config(config):
+    """验证Agent配置"""
+    return True
+
+# 获取依赖
+def get_agent_dependencies():
+    """获取Agent依赖"""
+    return ["app_cache", "app_name_matcher"]

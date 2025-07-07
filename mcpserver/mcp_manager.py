@@ -13,8 +13,7 @@ from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from mcpserver.mcp_registry import MCP_REGISTRY, register_all_handoffs # MCP服务注册表和handoff批量注册
-from mcpserver.websocket_manager import get_websocket_manager # 导入WebSocket管理器
+from mcpserver.mcp_registry import MCP_REGISTRY, register_all_handoffs, get_agent_instance # MCP服务注册表和handoff批量注册
 
 from config import DEBUG, LOG_LEVEL
 
@@ -131,17 +130,7 @@ class MCPManager:
         self.handoff_filters = {} # 服务对应的handoff过滤器
         self.handoff_callbacks = {} # 服务对应的handoff回调
         self.logger = logging.getLogger("MCPManager")
-        self.websocket_manager = get_websocket_manager() # 获取WebSocket管理器
         sys.stderr.write("MCPManager初始化\n")
-        
-    async def initialize_websocket(self, host: str = '127.0.0.1', port: int = 8081):
-        """初始化WebSocket管理器"""
-        try:
-            self.websocket_manager.set_mcp_manager(self)
-            await self.websocket_manager.start_server(host, port)
-            sys.stderr.write(f"WebSocket管理器已启动: ws://{host}:{port}\n")
-        except Exception as e:
-            sys.stderr.write(f"WebSocket管理器启动失败: {e}\n")
         
     def register_handoff(
         self,
@@ -185,13 +174,6 @@ class MCPManager:
     ) -> str:
         """执行handoff"""
         try:
-            # 通知handoff调用开始
-            await self.websocket_manager.notify_handoff_call(
-                service_name=service_name,
-                task=task,
-                status="started"
-            )
-            
             # 修复中文编码问题
             task_json = json.dumps(task, ensure_ascii=False)
             sys.stderr.write(f"执行handoff: service={service_name}, task={task_json}\n".encode('utf-8', errors='replace').decode('utf-8'))
@@ -226,9 +208,9 @@ class MCPManager:
                     # 继续执行，使用原始消息
                 
             # 创建代理实例
-            from mcpserver.mcp_registry import MCP_REGISTRY # 统一注册中心
+            from mcpserver.mcp_registry import MCP_REGISTRY, get_agent_instance # 统一注册中心
             agent_name = service["agent_name"]
-            agent = MCP_REGISTRY.get(agent_name)
+            agent = get_agent_instance(agent_name)  # 使用新的统一接口
             if not agent:
                 raise ValueError(f"找不到已注册的Agent实例: {agent_name}")
             sys.stderr.write(f"使用注册中心中的Agent实例: {agent_name}\n".encode('utf-8', errors='replace').decode('utf-8'))
@@ -237,14 +219,6 @@ class MCPManager:
             result = await agent.handle_handoff(task)
             sys.stderr.write(f"代理handoff执行结果: {result}\n".encode('utf-8', errors='replace').decode('utf-8'))
             
-            # 通知handoff调用成功
-            await self.websocket_manager.notify_handoff_call(
-                service_name=service_name,
-                task=task,
-                status="success",
-                result=result
-            )
-            
             return result
             
         except Exception as e:
@@ -252,14 +226,6 @@ class MCPManager:
             sys.stderr.write(f"{error_msg}\n".encode('utf-8', errors='replace').decode('utf-8'))
             import traceback
             traceback.print_exc(file=sys.stderr)
-            
-            # 通知handoff调用失败
-            await self.websocket_manager.notify_handoff_call(
-                service_name=service_name,
-                task=task,
-                status="error",
-                error=error_msg
-            )
             
             return json.dumps({
                 "status": "error",
@@ -376,10 +342,30 @@ class MCPManager:
         Returns:
             list: 可用服务列表
         """
-        return [
-            {"name": k, "description": getattr(v, 'instructions', ''), "id": k}
-            for k, v in MCP_REGISTRY.items()
-        ]
+        services = []
+        for k, v in MCP_REGISTRY.items():
+            if isinstance(v, dict):
+                if v.get('type') == 'dynamic':
+                    # 动态注册方式
+                    manifest = v.get('manifest', {})
+                    services.append({
+                        "name": k,
+                        "description": manifest.get('description', ''),
+                        "id": k,
+                        "type": "dynamic",
+                        "displayName": manifest.get('displayName', k)
+                    })
+                elif v.get('type') == 'metadata':
+                    # 元数据对象方式
+                    metadata = v.get('metadata', {})
+                    services.append({
+                        "name": k,
+                        "description": metadata.get('description', ''),
+                        "id": k,
+                        "type": "metadata",
+                        "displayName": metadata.get('displayName', k)
+                    })
+        return services
             
     def format_available_services(self) -> str:
         """格式化可用服务列表为字符串
@@ -387,10 +373,13 @@ class MCPManager:
         Returns:
             str: 格式化后的服务列表字符串
         """
-        return "\n".join([
-            f"- {name}: {info['tool_description']}"
-            for name, info in self.services.items()
-        ])
+        services = []
+        for name, info in self.services.items():
+            if isinstance(info, dict):
+                services.append(f"- {name}: {info.get('tool_description', '')}")
+            else:
+                services.append(f"- {name}: {getattr(info, 'instructions', '')}")
+        return "\n".join(services)
             
     async def cleanup(self):
         """清理所有MCP服务连接"""
@@ -403,7 +392,22 @@ class MCPManager:
             logger.error(f"清理MCP服务连接时出错: {str(e)}")
             import traceback;traceback.print_exc(file=sys.stderr)
 
-    def get_mcp(self, name): return MCP_REGISTRY.get(name) # 获取MCP服务
+    def get_mcp(self, name): 
+        """获取MCP服务，支持动态注册和元数据对象两种方式"""
+        agent_info = MCP_REGISTRY.get(name)
+        if agent_info is None:
+            return None
+        
+        if isinstance(agent_info, dict):
+            if agent_info.get('type') == 'dynamic':
+                # 动态注册方式：返回manifest
+                return agent_info.get('manifest')
+            elif agent_info.get('type') == 'metadata':
+                # 元数据对象方式：返回元数据
+                return agent_info.get('metadata')
+        
+        return None
+
     def list_mcps(self): return list(MCP_REGISTRY.keys()) # 列出所有MCP服务 
 
 _MCP_MANAGER=None

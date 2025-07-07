@@ -1,6 +1,7 @@
 from agents import Agent, ComputerTool
 import os, json, shutil
 import stat as statmod  # 仅在此方法内导入，防止全局污染
+import asyncio
 
 class FileComputer:
     """文件操作工具（增强版）"""
@@ -236,3 +237,30 @@ class FileAgent(Agent):
                 return json.dumps({"status": "error", "message": "未知操作", "data": {}}, ensure_ascii=False)
         except Exception as e:
             return json.dumps({"status": "error", "message": str(e), "data": {}}, ensure_ascii=False)
+
+# 工厂函数：动态创建Agent实例
+def create_file_agent():
+    """创建FileAgent实例"""
+    return FileAgent()
+
+# 获取Agent元数据
+def get_agent_metadata():
+    """获取Agent元数据"""
+    import os
+    manifest_path = os.path.join(os.path.dirname(__file__), "agent-manifest.json")
+    try:
+        with open(manifest_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"加载元数据失败: {e}")
+        return None
+
+# 验证配置
+def validate_agent_config(config):
+    """验证Agent配置"""
+    return True
+
+# 获取依赖
+def get_agent_dependencies():
+    """获取Agent依赖"""
+    return []

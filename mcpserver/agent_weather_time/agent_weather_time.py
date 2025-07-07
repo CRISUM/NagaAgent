@@ -6,6 +6,7 @@ from config import DEBUG # 导入全局DEBUG配置
 import requests # 用于同步获取IP和城市
 import re # 用于正则解析
 from datetime import datetime, timedelta # 用于日期处理
+import asyncio # 导入asyncio模块
 IPIP_URL = "https://myip.ipip.net/" # 统一配置
 
 class WeatherTimeTool:
@@ -254,3 +255,30 @@ class WeatherTimeAgent(Agent):
             return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return json.dumps({"status": "error", "message": str(e), "data": {}}, ensure_ascii=False)
+
+# 工厂函数：动态创建Agent实例
+def create_weather_time_agent():
+    """创建WeatherTimeAgent实例"""
+    return WeatherTimeAgent()
+
+# 获取Agent元数据
+def get_agent_metadata():
+    """获取Agent元数据"""
+    import os
+    manifest_path = os.path.join(os.path.dirname(__file__), "agent-manifest.json")
+    try:
+        with open(manifest_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"加载元数据失败: {e}")
+        return None
+
+# 验证配置
+def validate_agent_config(config):
+    """验证Agent配置"""
+    return True
+
+# 获取依赖
+def get_agent_dependencies():
+    """获取Agent依赖"""
+    return ["aiohttp", "requests"]

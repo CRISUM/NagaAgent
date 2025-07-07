@@ -1,170 +1,137 @@
 # mcp_registry.py # 自动注册所有MCP服务和handoff schema
-import importlib, inspect, os
+# 
+# 架构说明：
+# 基于动态注册系统 - 通过agent-manifest.json定义Agent元数据，支持动态加载和热插拔
+# 所有Agent都通过agent-manifest.json文件进行动态注册
+
+import importlib, inspect, os, json
 from pathlib import Path
 import concurrent.futures # 新增线程池支持
+from mcpserver.dynamic_agent_registry import dynamic_registry
 
 MCP_REGISTRY = {} # 全局MCP服务池
 
-def is_concrete_class(cls):
-    # 过滤掉抽象基类
-    if hasattr(cls, '__abstractmethods__') and len(cls.__abstractmethods__) > 0:
-        return False
-    # 彻底过滤所有名为Agent或ComputerTool的类（无论在哪个模块）
-    if cls.__name__ in ['Agent', 'ComputerTool']:
-        return False
-    return True
-
-def auto_register_mcp(mcp_dir='mcpserver'):
-    d = Path(mcp_dir)
-    agent_classes = [] # 需要初始化的Agent/Tool类列表
-    for f in d.glob('**/*.py'):
-        if f.stem.startswith('__'): continue
-        m = importlib.import_module(f'{f.parent.as_posix().replace("/", ".")}.{f.stem}')
-        for n, o in inspect.getmembers(m, inspect.isclass):
-            if (n.endswith('Agent') or n.endswith('Tool')) and is_concrete_class(o):
-                agent_classes.append((n, o))
-
-    def init_agent(n_o):
-        n, o = n_o
+async def auto_register_mcp(mcp_dir='mcpserver'):
+    """使用动态注册系统自动注册所有MCP服务"""
+    print("🔄 使用动态注册系统发现Agent...")
+    
+    # 使用动态注册系统发现Agent
+    await dynamic_registry.discover_agents()
+    
+    # 将动态注册的Agent同步到MCP_REGISTRY
+    for agent_name, manifest in dynamic_registry.agents.items():
         try:
-            instance = o()
-            key = getattr(instance, 'name', n)
-            MCP_REGISTRY[key] = instance # 用name属性作为key，保证与handoff一致
-            return f"{key} 初始化成功"
+            # 获取Agent实例（延迟初始化）
+            instance = dynamic_registry.get_agent_instance(agent_name)
+            
+            if instance:
+                MCP_REGISTRY[agent_name] = {
+                    'type': 'dynamic',
+                    'manifest': manifest,
+                    'instance': instance,
+                    'is_distributed': manifest.get('is_distributed', False),
+                    'server_id': manifest.get('server_id', None)
+                }
+                print(f"✅ 动态注册Agent: {agent_name}")
+            else:
+                print(f"❌ 动态注册Agent失败: {agent_name} - 无法创建实例")
+                
         except Exception as e:
-            return f"{n} 初始化失败: {e}"
+            print(f"❌ 动态注册Agent {agent_name} 失败: {e}")
+    
+    print(f"🎉 动态注册完成，共注册 {len(dynamic_registry.agents)} 个Agent")
+    return list(dynamic_registry.agents.keys())
 
-    results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-        future_to_class = {executor.submit(init_agent, n_o): n_o for n_o in agent_classes}
-        for future in concurrent.futures.as_completed(future_to_class):
-            result = future.result()
-            results.append(result)
-    return results
+def auto_register_mcp_sync(mcp_dir='mcpserver'):
+    """同步版本的自动注册（向后兼容）"""
+    import asyncio
+    return asyncio.run(auto_register_mcp(mcp_dir))
 
-auto_register_mcp()
+# 获取Agent实例的统一接口
+def get_agent_instance(agent_name):
+    """获取Agent实例 - 只支持动态注册方式"""
+    if agent_name not in MCP_REGISTRY:
+        return None
+    
+    agent_info = MCP_REGISTRY[agent_name]
+    
+    if agent_info['type'] == 'dynamic':
+        # 动态注册方式：直接从动态注册系统获取实例
+        return agent_info['instance']
+    
+    return None
 
-# handoff注册schema集中管理
-HANDOFF_SCHEMAS = [
-    {
-        "service_name": "playwright",
-        "tool_name": "browser_handoff",
-        "tool_description": "处理所有浏览器相关操作",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "url": {"type": "string", "description": "要访问的URL"},
-                "query": {"type": "string", "description": "原始查询文本"},
-                "messages": {"type": "array", "description": "对话历史"},
-                "source": {"type": "string", "description": "请求来源"}
-            },
-            "required": ["query", "messages"]
-        },
-        "agent_name": "Playwright Browser Agent",
-        "strict_schema": False
-    },
-    {
-        "service_name": "file",
-        "tool_name": "file_handoff",
-        "tool_description": "文件读写与管理",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "action": {"type": "string", "description": "操作类型（read/write/append/delete/mkdir等）"},
-                "path": {"type": "string", "description": "文件或目录路径"},
-                "content": {"type": "string", "description": "写入内容", "default": ""},
-                "append": {"type": "boolean", "description": "是否追加", "default": False},
-                "recursive": {"type": "boolean", "description": "递归删除", "default": False}
-            },
-            "required": ["action", "path"]
-        },
-        "agent_name": "File Agent",
-        "strict_schema": False
-    },
-    {
-        "service_name": "coder",
-        "tool_name": "coder_handoff",
-        "tool_description": "代码编辑与运行",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "action": {"type": "string", "description": "操作类型（edit/read/run/shell等）"},
-                "file": {"type": "string", "description": "代码文件路径"},
-                "code": {"type": "string", "description": "代码内容", "default": ""},
-                "mode": {"type": "string", "description": "写入模式", "default": "w"}
-            },
-            "required": ["action", "file"]
-        },
-        "agent_name": "Coder Agent",
-        "strict_schema": False
-    },
-    {
-        "service_name": "app_launcher",
-        "tool_name": "app_launcher_handoff",
-        "tool_description": "本地应用启动与管理",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "action": {"type": "string", "description": "操作类型（open/list/refresh）"},
-                "app": {"type": "string", "description": "应用名或路径"},
-                "args": {"type": "array", "description": "启动参数", "items": {"type": "string"}, "default": []}
-            },
-            "required": ["action"]
-        },
-        "agent_name": "AppLauncher Agent",
-        "strict_schema": False
-    },
-    {
-        "service_name": "weather_time",
-        "tool_name": "weather_time_handoff",
-        "tool_description": "天气和时间查询",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "action": {"type": "string", "description": "操作类型（weather/time）"},
-                "ip": {"type": "string", "description": "用户IP，可选，自动获取"},
-                "city": {"type": "string", "description": "城市名，可选，自动识别"}
-            },
-            "required": ["action"]
-        },
-        "agent_name": "WeatherTime Agent",
-        "strict_schema": False
-    },
-    {
-        "service_name": "grag_memory",
-        "tool_name": "grag_memory_handoff",
-        "tool_description": "GRAG知识图谱记忆管理",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "action": {"type": "string", "description": "操作类型（query/stats/clear/extract）"},
-                "question": {"type": "string", "description": "查询问题（query操作需要）"},
-                "text": {"type": "string", "description": "要提取的文本（extract操作需要）"}
-            },
-            "required": ["action"]
-        },
-        "agent_name": "GRAG Memory Agent",
-        "strict_schema": False
-    },
-]
+# 获取Agent元数据的统一接口
+def get_agent_metadata(agent_name):
+    """获取Agent元数据 - 只支持动态注册方式"""
+    if agent_name not in MCP_REGISTRY:
+        return None
+    
+    agent_info = MCP_REGISTRY[agent_name]
+    
+    if agent_info['type'] == 'dynamic':
+        return agent_info.get('manifest')
+    
+    return None
 
-# 删除shell相关schema
-HANDOFF_SCHEMAS = [
-    s for s in HANDOFF_SCHEMAS if s.get('service_name') != 'shell'
-]
-
+# 注册所有handoff服务 - 基于动态注册驱动
 def register_all_handoffs(mcp_manager):
-    """批量注册所有handoff服务"""
+    """批量注册所有handoff服务 - 基于动态注册驱动"""
     registered = []
-    for schema in HANDOFF_SCHEMAS:
-        mcp_manager.register_handoff(
-            service_name=schema["service_name"],
-            tool_name=schema["tool_name"],
-            tool_description=schema["tool_description"],
-            input_schema=schema["input_schema"],
-            agent_name=schema["agent_name"],
-            strict_schema=schema.get("strict_schema", False)
-        )
-        registered.append(schema["service_name"])
+    
+    # 直接从dynamic_registry获取Agent信息
+    for agent_name, manifest in dynamic_registry.agents.items():
+        try:
+            # 获取Agent实例（延迟初始化）
+            instance = dynamic_registry.get_agent_instance(agent_name)
+            
+            if instance:
+                # 同步到MCP_REGISTRY
+                MCP_REGISTRY[agent_name] = {
+                    'type': 'dynamic',
+                    'manifest': manifest,
+                    'instance': instance,
+                    'is_distributed': manifest.get('is_distributed', False),
+                    'server_id': manifest.get('server_id', None)
+                }
+                
+                service_name = manifest.get('name', agent_name).lower().replace('agent', '')
+            
+            # 构建handoff schema
+            schema = {
+                "service_name": service_name,
+                "tool_name": f"{service_name}_handoff",
+                    "tool_description": manifest.get('description', f'{agent_name}服务'),
+                    "input_schema": manifest.get('inputSchema', {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "description": "操作类型"},
+                        "query": {"type": "string", "description": "查询内容"}
+                    },
+                    "required": ["action"]
+                }),
+                "agent_name": agent_name,
+                "strict_schema": False
+            }
+            
+            # 注册到MCP管理器
+            mcp_manager.register_handoff(
+                service_name=schema["service_name"],
+                tool_name=schema["tool_name"],
+                tool_description=schema["tool_description"],
+                input_schema=schema["input_schema"],
+                agent_name=schema["agent_name"],
+                strict_schema=schema.get("strict_schema", False)
+            )
+            registered.append(schema["service_name"])
+        except Exception as e:
+            import sys
+            sys.stderr.write(f"❌ 注册Agent {agent_name} 失败: {e}\n")
+    
     import sys
-    sys.stderr.write(f'当前已注册服务: {registered}\n')
+    sys.stderr.write(f'✅ 动态注册驱动注册完成:\n')
+    sys.stderr.write(f'   - 注册服务: {registered}\n')
+    sys.stderr.write(f'   - 总计注册服务: {len(registered)}\n')
+
+# 注意：自动注册已移至conversation_core.py中处理，避免重复注册
+# auto_register_mcp_sync()  # 已删除，避免重复注册
