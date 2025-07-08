@@ -57,7 +57,7 @@ logging.getLogger("mcpserver.dynamic_agent_registry").setLevel(logging.WARNING)
 logging.getLogger("asyncio").setLevel(logging.WARNING)
 logger = logging.getLogger("NagaConversation")
 
-_MCP_HANDOFF_REGISTERED=False
+# _MCP_HANDOFF_REGISTERED=False  # 已移除，不再需要
 _TREE_THINKING_SUBSYSTEMS_INITIALIZED=False
 _DYNAMIC_REGISTRY_INITIALIZED=False
 
@@ -96,16 +96,17 @@ class NagaConversation: # 对话主类
                 logger.warning(f"树状思考系统实例创建失败: {e}")
                 self.tree_thinking = None
         
-        global _MCP_HANDOFF_REGISTERED
-        if not _MCP_HANDOFF_REGISTERED:
-            try:
-                logger.info("开始注册所有Agent handoff处理器...")
-                register_all_handoffs(self.mcp)  # 一键注册所有Agent
-                logger.info("成功注册所有Agent handoff处理器")
-                _MCP_HANDOFF_REGISTERED = True
-            except Exception as e:
-                logger.error(f"注册Agent handoff处理器失败: {e}")
-                traceback.print_exc(file=sys.stderr)
+        # 移除重复的handoff注册，统一在_init_services中处理
+        # global _MCP_HANDOFF_REGISTERED
+        # if not _MCP_HANDOFF_REGISTERED:
+        #     try:
+        #         logger.info("开始注册所有Agent handoff处理器...")
+        #         register_all_handoffs(self.mcp)  # 一键注册所有Agent
+        #         logger.info("成功注册所有Agent handoff处理器")
+        #         _MCP_HANDOFF_REGISTERED = True
+        #     except Exception as e:
+        #         logger.error(f"注册Agent handoff处理器失败: {e}")
+        #         traceback.print_exc(file=sys.stderr)
 
     def _init_dynamic_registry(self):
         """初始化动态注册系统"""
@@ -120,17 +121,29 @@ class NagaConversation: # 对话主类
             try:
                 loop = asyncio.get_running_loop()
                 # 如果已有事件循环，使用create_task
-                loop.create_task(dynamic_registry.discover_agents())
+                loop.create_task(self._init_services())
             except RuntimeError:
                 # 如果没有事件循环，创建新的
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                loop.run_until_complete(dynamic_registry.discover_agents())
+                loop.run_until_complete(self._init_services())
                 loop.close()
             logger.info("动态注册系统初始化完成")
             _DYNAMIC_REGISTRY_INITIALIZED = True
         except Exception as e:
             logger.error(f"动态注册系统初始化失败: {e}")
+
+    async def _init_services(self):
+        """初始化所有服务"""
+        # 1. 发现Agent
+        await dynamic_registry.discover_agents()
+        
+        # 2. 自动注册所有服务
+        self.mcp.auto_register_services()
+        
+        # 3. 注册handoff服务（向后兼容）
+        from mcpserver.mcp_registry import register_all_handoffs
+        register_all_handoffs(self.mcp)
 
     def save_log(self, u, a):  # 保存对话日志
         if self.dev_mode:
@@ -223,11 +236,30 @@ class NagaConversation: # 对话主类
         results = []
         for tool_call in tool_calls:
             try:
-                result = await self.mcp.handoff(
-                    service_name=tool_call['name'],
-                    task=tool_call['args']
-                )
-                results.append(f"来自工具 \"{tool_call['name']}\" 的结果:\n{result}")
+                # 解析工具调用格式
+                tool_name = tool_call['name']
+                args = tool_call['args']
+                
+                # 检查是否是新的统一调用格式
+                if 'service_name' in args and 'tool_name' in args:
+                    # 新的统一调用格式
+                    service_name = args['service_name']
+                    actual_tool_name = args['tool_name']
+                    tool_args = {k: v for k, v in args.items() if k not in ['service_name', 'tool_name']}
+                    
+                    result = await self.mcp.unified_call(
+                        service_name=service_name,
+                        tool_name=actual_tool_name,
+                        args=tool_args
+                    )
+                else:
+                    # 旧的handoff格式（向后兼容）
+                    result = await self.mcp.handoff(
+                        service_name=tool_name,
+                        task=args
+                    )
+                
+                results.append(f"来自工具 \"{tool_name}\" 的结果:\n{result}")
             except Exception as e:
                 error_result = f"执行工具 {tool_call['name']} 时发生错误：{str(e)}"
                 results.append(error_result)
@@ -266,6 +298,40 @@ class NagaConversation: # 对话主类
                 yield ("娜迦", line)
         return text_stream()
 
+    def _format_services_for_prompt(self, available_services: dict) -> str:
+        """格式化可用服务列表为prompt字符串，MCP服务和Agent服务分开"""
+        mcp_services = available_services.get("mcp_services", [])
+        agent_services = available_services.get("agent_services", [])
+        
+        # 格式化MCP服务列表
+        mcp_list = []
+        for service in mcp_services:
+            name = service.get("name", "")
+            description = service.get("description", "")
+            if description:
+                mcp_list.append(f"- {name}: {description}")
+            else:
+                mcp_list.append(f"- {name}")
+        
+        # 格式化Agent服务列表
+        agent_list = []
+        for service in agent_services:
+            name = service.get("name", "")
+            description = service.get("description", "")
+            tool_name = service.get("tool_name", "agent")
+            if description:
+                agent_list.append(f"- {name} (工具名: {tool_name}): {description}")
+            else:
+                agent_list.append(f"- {name} (工具名: {tool_name})")
+        
+        # 返回格式化的服务列表
+        result = {
+            "available_mcp_services": "\n".join(mcp_list) if mcp_list else "无",
+            "available_agent_services": "\n".join(agent_list) if agent_list else "无"
+        }
+        
+        return result
+
     async def process(self, u, is_voice_input=False):  # 添加is_voice_input参数
         try:
             # 开发者模式优先判断
@@ -291,7 +357,12 @@ class NagaConversation: # 对话主类
             
             # 添加handoff提示词
             system_prompt = f"{RECOMMENDED_PROMPT_PREFIX}\n{config.prompts.naga_system_prompt}"
-            sysmsg = {"role": "system", "content": system_prompt.format(available_mcp_services=self.mcp.format_available_services())}  # 直接使用系统提示词
+            
+            # 获取过滤后的服务列表
+            available_services = self.mcp.get_available_services_filtered()
+            services_text = self._format_services_for_prompt(available_services)
+            
+            sysmsg = {"role": "system", "content": system_prompt.format(**services_text)}  # 直接使用系统提示词
             msgs = [sysmsg] if sysmsg else []
             msgs += self.messages[-20:] + [{"role": "user", "content": u}]
 

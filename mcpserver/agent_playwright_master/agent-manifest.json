@@ -1,5 +1,5 @@
 {
-  "name": "ControllerAgent",
+  "name": "PlaywrightAgent",
   "displayName": "浏览器控制Agent",
   "version": "1.0.0",
   "description": "三层Agent架构的浏览器自动化系统，智能调度BrowserAgent和ContentAgent。",
@@ -7,10 +7,10 @@
   "agentType": "synchronous",
   "entryPoint": {
     "module": "mcpserver.agent_playwright_master.agent_controller",
-    "class": "ControllerAgent"
+    "class": "PlaywrightAgent"
   },
   "factory": {
-    "create_instance": "create_controller_agent"
+    "create_instance": "create_playwright_agent"
   },
   "communication": {
     "protocol": "stdio",

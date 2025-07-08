@@ -5,8 +5,9 @@ import html2text  # 用于HTML转Markdown #
 import os
 from dotenv import load_dotenv
 from agents import Agent, AgentHooks, RunContextWrapper
-from .controller import BrowserAgent
-from .browser import ContentAgent
+# 移除循环导入
+# from .controller import BrowserAgent
+# from .browser import ContentAgent
 from config import config  # 使用新的配置系统
 
 AD_SELECTORS = [
@@ -126,10 +127,16 @@ API_KEY = config.api.api_key
 BASE_URL = config.api.base_url
 MODEL_NAME = config.api.model
 
-ContentAgent = Agent(
-    name="ContentAgent",
-    instructions="你负责对网页内容进行清洗、摘要、翻译等处理。",
-    tools=[PlaywrightBrowser],
-    hooks=ContentAgentHooks(),
-    model=MODEL_NAME
-) 
+# 延迟创建ContentAgent实例，避免循环导入
+def create_content_agent():
+    """创建ContentAgent实例的工厂函数"""
+    return Agent(
+        name="ContentAgent",
+        instructions="你负责对网页内容进行清洗、摘要、翻译等处理。",
+        tools=[PlaywrightBrowser],
+        hooks=ContentAgentHooks(),
+        model=MODEL_NAME
+    )
+
+# 为了向后兼容，保留ContentAgent变量
+ContentAgent = create_content_agent() 

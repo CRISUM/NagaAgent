@@ -4,10 +4,15 @@
   "version": "1.0.0",
   "description": "支持代码编辑、读取、运行和shell命令执行。",
   "author": "Naga代码生成模块",
-  "agentType": "synchronous",
+  "agentType": "mcp",
   "entryPoint": {
     "module": "mcpserver.agent_coder.agent_coder",
     "class": "CoderAgent"
+  },
+  "factory": {
+    "create_instance": "create_coder_agent",
+    "validate_config": "validate_agent_config",
+    "get_dependencies": "get_agent_dependencies"
   },
   "communication": {
     "protocol": "stdio",
@@ -51,11 +56,6 @@
   },
   "configSchema": {
     "CODE_AGENT_DEFAULT_TIMEOUT": "integer"
-  },
-  "factory": {
-    "create_instance": "create_coder_agent",
-    "validate_config": "validate_agent_config",
-    "get_dependencies": "get_agent_dependencies"
   },
   "runtime": {
     "instance": null,

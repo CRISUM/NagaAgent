@@ -4,10 +4,15 @@
   "version": "1.0.0",
   "description": "支持天气查询、时间查询，自动识别城市和IP。",
   "author": "Naga地理模块",
-  "agentType": "synchronous",
+  "agentType": "mcp",
   "entryPoint": {
     "module": "mcpserver.agent_weather_time.agent_weather_time",
     "class": "WeatherTimeAgent"
+  },
+  "factory": {
+    "create_instance": "create_weather_time_agent",
+    "validate_config": "validate_agent_config",
+    "get_dependencies": "get_agent_dependencies"
   },
   "communication": {
     "protocol": "stdio",
@@ -45,11 +50,6 @@
   },
   "configSchema": {
     "WEATHER_AGENT_DEFAULT_CITY": "string"
-  },
-  "factory": {
-    "create_instance": "create_weather_time_agent",
-    "validate_config": "validate_agent_config",
-    "get_dependencies": "get_agent_dependencies"
   },
   "runtime": {
     "instance": null,

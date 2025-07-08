@@ -1,8 +1,9 @@
 import os
 from dotenv import load_dotenv
 from agents import Agent, AgentHooks, RunContextWrapper
-from .controller import BrowserAgent
-from .browser import ContentAgent
+# 移除循环导入，使用延迟导入
+# from .controller import BrowserAgent
+# from .browser import ContentAgent
 from config import config  # 使用新的配置系统
 
 load_dotenv()
@@ -11,15 +12,15 @@ API_KEY = config.api.api_key
 BASE_URL = config.api.base_url
 MODEL_NAME = config.api.model
 
-class ControllerAgentHooks(AgentHooks):
+class PlaywrightAgentHooks(AgentHooks):
     async def on_start(self, context: RunContextWrapper, agent: Agent):
-        print(f"[ControllerAgent] 开始: {agent.name}")
+        print(f"[PlaywrightAgent] 开始: {agent.name}")
     async def on_end(self, context: RunContextWrapper, agent: Agent, output):
-        print(f"[ControllerAgent] 结束: {agent.name}, 输出: {output}")
+        print(f"[PlaywrightAgent] 结束: {agent.name}, 输出: {output}")
 
-class ControllerAgent(Agent):
+class PlaywrightAgent(Agent):
     """浏览器控制Agent #"""
-    name = "ControllerAgent"
+    name = "PlaywrightAgent"
     instructions = "你负责理解用户目标，自动分配任务给BrowserAgent和ContentAgent，并汇总结果。"
     def __init__(self):
         super().__init__(
@@ -30,7 +31,7 @@ class ControllerAgent(Agent):
         )
         # 可选：初始化BrowserAgent/ContentAgent引用
         import sys
-        sys.stderr.write('✅ ControllerAgent初始化完成\n')
+        sys.stderr.write('✅ PlaywrightAgent初始化完成\n')
 
     async def handle_handoff(self, task: dict) -> str:
         """处理MCP handoff请求，智能分配任务 #"""
@@ -43,20 +44,24 @@ class ControllerAgent(Agent):
             elif task_type == "content" or action in ["get_content", "get_title", "get_screenshot", "subscribe_page_change"]:
                 return f"ContentAgent已处理内容任务: {action}"
             else:
-                return f"ControllerAgent正在协调多Agent处理复杂任务: {action}"
+                return f"PlaywrightAgent正在协调多Agent处理复杂任务: {action}"
         except Exception as e:
-            return f"ControllerAgent处理失败: {str(e)}"
+            return f"PlaywrightAgent处理失败: {str(e)}"
 
 # 工厂函数，用于动态注册系统创建实例
-def create_controller_agent():
-    """创建ControllerAgent实例的工厂函数"""
+def create_playwright_agent():
+    """创建PlaywrightAgent实例的工厂函数"""
+    # 延迟导入避免循环依赖
+    from .controller import BrowserAgent
+    from .browser import ContentAgent
+    
     return Agent(
-        name="ControllerAgent",
+        name="PlaywrightAgent",
         instructions="你负责理解用户目标，自动分配任务给BrowserAgent和ContentAgent，并汇总结果。",
         handoffs=[BrowserAgent, ContentAgent],
-        hooks=ControllerAgentHooks(),
+        hooks=PlaywrightAgentHooks(),
         model=MODEL_NAME
     )
 
-# 为了向后兼容，保留ControllerAgent变量
-ControllerAgent = create_controller_agent() 
+# 为了向后兼容，保留PlaywrightAgent变量
+PlaywrightAgent = create_playwright_agent() 

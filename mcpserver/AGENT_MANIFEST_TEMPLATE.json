@@ -1,0 +1,48 @@
+{
+  "name": "AgentName",
+  "displayName": "Agent显示名称",
+  "version": "1.0.0",
+  "description": "Agent功能描述",
+  "author": "作者或模块名称",
+  "agentType": "mcp",
+  "entryPoint": {
+    "module": "mcpserver.agent_name.agent_file",
+    "class": "AgentClassName"
+  },
+  "factory": {
+    "create_instance": "create_agent_instance",
+    "validate_config": "validate_agent_config",
+    "get_dependencies": "get_agent_dependencies"
+  },
+  "communication": {
+    "protocol": "stdio",
+    "timeout": 15000
+  },
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "command": "command_name",
+        "description": "命令描述，包含参数说明和调用示例",
+        "example": "{\"action\": \"command_name\", \"param\": \"value\"}"
+      }
+    ]
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "action": {"type": "string", "description": "操作类型"},
+      "param1": {"type": "string", "description": "参数1描述"},
+      "param2": {"type": "integer", "description": "参数2描述"}
+    },
+    "required": ["action"]
+  },
+  "configSchema": {
+    "AGENT_CONFIG_KEY": "string"
+  },
+  "runtime": {
+    "instance": null,
+    "is_initialized": false,
+    "last_used": null,
+    "usage_count": 0
+  }
+} 

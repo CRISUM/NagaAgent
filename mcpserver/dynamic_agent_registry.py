@@ -78,8 +78,62 @@ class DynamicAgentRegistry:
     
     def _validate_manifest(self, manifest: Dict) -> bool:
         """验证manifest文件"""
-        required_fields = ['name', 'displayName', 'version', 'description']
-        return all(field in manifest for field in required_fields)
+        # 必需字段
+        required_fields = ['name', 'displayName', 'version', 'description', 'author', 'agentType', 'entryPoint']
+        if not all(field in manifest for field in required_fields):
+            missing_fields = [field for field in required_fields if field not in manifest]
+            logger.warn(f"[DynamicAgentRegistry] manifest缺少必需字段: {missing_fields}")
+            return False
+        
+        # 验证agentType字段
+        valid_agent_types = ['mcp', 'synchronous', 'asynchronous']
+        if manifest.get('agentType') not in valid_agent_types:
+            logger.warn(f"[DynamicAgentRegistry] agentType必须是以下之一: {valid_agent_types}")
+            return False
+        
+        # 验证entryPoint结构
+        entry_point = manifest.get('entryPoint', {})
+        if not isinstance(entry_point, dict):
+            logger.warn(f"[DynamicAgentRegistry] entryPoint必须是对象")
+            return False
+        
+        required_entry_fields = ['module', 'class']
+        if not all(field in entry_point for field in required_entry_fields):
+            missing_entry_fields = [field for field in required_entry_fields if field not in entry_point]
+            logger.warn(f"[DynamicAgentRegistry] entryPoint缺少必需字段: {missing_entry_fields}")
+            return False
+        
+        # 验证factory结构（如果存在）
+        factory = manifest.get('factory')
+        if factory and not isinstance(factory, dict):
+            logger.warn(f"[DynamicAgentRegistry] factory必须是对象")
+            return False
+        
+        # 验证communication结构（如果存在）
+        communication = manifest.get('communication')
+        if communication and not isinstance(communication, dict):
+            logger.warn(f"[DynamicAgentRegistry] communication必须是对象")
+            return False
+        
+        # 验证capabilities结构（如果存在）
+        capabilities = manifest.get('capabilities')
+        if capabilities and not isinstance(capabilities, dict):
+            logger.warn(f"[DynamicAgentRegistry] capabilities必须是对象")
+            return False
+        
+        # 验证inputSchema结构（如果存在）
+        input_schema = manifest.get('inputSchema')
+        if input_schema and not isinstance(input_schema, dict):
+            logger.warn(f"[DynamicAgentRegistry] inputSchema必须是对象")
+            return False
+        
+        # 验证configSchema结构（如果存在）
+        config_schema = manifest.get('configSchema')
+        if config_schema and not isinstance(config_schema, dict):
+            logger.warn(f"[DynamicAgentRegistry] configSchema必须是对象")
+            return False
+        
+        return True
     
     async def _load_agent_config(self, agent_folder: Path) -> Dict:
         """加载Agent特定的配置文件"""

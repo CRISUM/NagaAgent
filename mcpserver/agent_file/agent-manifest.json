@@ -4,10 +4,15 @@
   "version": "1.0.0",
   "description": "支持文件的读写、创建、删除、目录管理等操作。",
   "author": "Naga文件操作模块",
-  "agentType": "synchronous",
+  "agentType": "mcp",
   "entryPoint": {
     "module": "mcpserver.agent_file.agent_file",
     "class": "FileAgent"
+  },
+  "factory": {
+    "create_instance": "create_file_agent",
+    "validate_config": "validate_agent_config",
+    "get_dependencies": "get_agent_dependencies"
   },
   "communication": {
     "protocol": "stdio",
@@ -60,11 +65,6 @@
   },
   "configSchema": {
     "FILE_AGENT_BASE_DIR": "string"
-  },
-  "factory": {
-    "create_instance": "create_file_agent",
-    "validate_config": "validate_agent_config",
-    "get_dependencies": "get_agent_dependencies"
   },
   "runtime": {
     "instance": null,

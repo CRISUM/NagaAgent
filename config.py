@@ -117,6 +117,50 @@ class HandoffConfig(BaseModel):
     show_output: bool = Field(default=False, description="是否显示工具调用输出")
 
 
+class MCPConfig(BaseModel):
+    """MCP服务配置"""
+    # MCP服务配置
+    mcp_services: List[str] = Field(
+        default=[],
+        description="可调用的MCP服务列表（不包含Agent服务）"
+    )
+    
+    # Agent服务配置
+    agent_services: List[str] = Field(
+        default=[],
+        description="可调用的Agent服务列表"
+    )
+    
+    # 特殊工具名配置
+    agent_tool_name: str = Field(
+        default="agent",
+        description="用于调用Agent的特殊工具名"
+    )
+    
+    # 服务冲突处理
+    agent_priority: bool = Field(
+        default=True,
+        description="当服务名冲突时，Agent服务优先"
+    )
+    
+    # 自动发现配置
+    auto_discover_agents: bool = Field(
+        default=True,
+        description="自动发现和注册Agent服务"
+    )
+    
+    auto_discover_mcp: bool = Field(
+        default=True,
+        description="自动发现和注册MCP服务"
+    )
+    
+    # 服务过滤配置
+    exclude_agent_tools_from_mcp: bool = Field(
+        default=True,
+        description="从MCP服务中排除已注册为Agent的服务"
+    )
+
+
 class BrowserConfig(BaseModel):
     """浏览器配置"""
     path: Optional[str] = Field(default=None, description="浏览器可执行文件路径")
@@ -301,7 +345,9 @@ param2: 「始」参数值2「末」
 
 如无需调用工具，直接回复message字段内容即可。
 
-- 可用的MCP服务有：{available_mcp_services}""",
+- 可用的MCP服务有：{available_mcp_services}
+- 可用的Agent服务有：{available_agent_services}
+""",
         description="娜迦系统提示词"
     )
 
@@ -377,6 +423,7 @@ class NagaConfig(BaseModel):
     api_server: APIServerConfig = Field(default_factory=APIServerConfig)
     grag: GRAGConfig = Field(default_factory=GRAGConfig)
     handoff: HandoffConfig = Field(default_factory=HandoffConfig)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     tts: TTSConfig = Field(default_factory=TTSConfig)
     quick_model: QuickModelConfig = Field(default_factory=QuickModelConfig)
@@ -553,6 +600,13 @@ OUTPUT_FILTER_CONFIG = config.output_filter_config_dict
 DIFFICULTY_JUDGMENT_CONFIG = config.difficulty_judgment_config_dict
 SCORING_SYSTEM_CONFIG = config.scoring_system_config_dict
 THINKING_COMPLETENESS_CONFIG = config.thinking_completeness_config_dict
+
+# MCP配置兼容性变量
+MCP_AGENT_TOOL_NAME = config.mcp.agent_tool_name
+MCP_AGENT_PRIORITY = config.mcp.agent_priority
+MCP_AUTO_DISCOVER_AGENTS = config.mcp.auto_discover_agents
+MCP_AUTO_DISCOVER_MCP = config.mcp.auto_discover_mcp
+MCP_EXCLUDE_AGENT_TOOLS_FROM_MCP = config.mcp.exclude_agent_tools_from_mcp
 
 # 系统提示词
 NAGA_SYSTEM_PROMPT = config.prompts.naga_system_prompt

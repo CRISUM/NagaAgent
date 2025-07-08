@@ -14,6 +14,7 @@ from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcpserver.mcp_registry import MCP_REGISTRY, register_all_handoffs, get_agent_instance # MCP服务注册表和handoff批量注册
+from mcpserver.dynamic_agent_registry import dynamic_registry # 动态注册系统
 
 from config import DEBUG, LOG_LEVEL
 
@@ -132,6 +133,11 @@ class MCPManager:
         self.logger = logging.getLogger("MCPManager")
         sys.stderr.write("MCPManager初始化\n")
         
+        # 新增：服务分类管理
+        self.agent_services = {}  # Agent服务池
+        self.mcp_services = {}    # MCP服务池
+        self.service_type_map = {}  # 服务类型映射
+        
     def register_handoff(
         self,
         service_name: str,
@@ -144,7 +150,7 @@ class MCPManager:
     ):
         """注册handoff服务"""
         if service_name in self.services:
-            sys.stderr.write(f"服务{service_name}已注册，跳过重复注册\n")
+            # 静默跳过重复注册，不打印信息
             return
         self.services[service_name] = {
             "tool_name": tool_name,
@@ -337,15 +343,18 @@ class MCPManager:
             return None
             
     def get_available_services(self) -> list:
-        """获取所有可用的MCP服务列表
+        """获取所有可用的MCP服务列表（不包含Agent服务）
         
         Returns:
-            list: 可用服务列表
+            list: 可用MCP服务列表
         """
         services = []
         for k, v in MCP_REGISTRY.items():
             if isinstance(v, dict):
                 if v.get('type') == 'dynamic':
+                    # 检查是否已注册为Agent服务
+                    if k in self.agent_services:
+                        continue  # 跳过已注册为Agent的服务
                     # 动态注册方式
                     manifest = v.get('manifest', {})
                     services.append({
@@ -356,6 +365,9 @@ class MCPManager:
                         "displayName": manifest.get('displayName', k)
                     })
                 elif v.get('type') == 'metadata':
+                    # 检查是否已注册为Agent服务
+                    if k in self.agent_services:
+                        continue  # 跳过已注册为Agent的服务
                     # 元数据对象方式
                     metadata = v.get('metadata', {})
                     services.append({
@@ -368,19 +380,19 @@ class MCPManager:
         return services
             
     def format_available_services(self) -> str:
-        """格式化可用服务列表为字符串
+        """格式化可用MCP服务列表为字符串（不包含Agent服务）
         
         Returns:
-            str: 格式化后的服务列表字符串
+            str: 格式化后的MCP服务列表字符串
         """
         services = []
-        for name, info in self.services.items():
+        for name, info in self.mcp_services.items():
             if isinstance(info, dict):
-                services.append(f"- {name}: {info.get('tool_description', '')}")
+                services.append(f"- {name}: {info.get('description', '')}")
             else:
                 services.append(f"- {name}: {getattr(info, 'instructions', '')}")
-        return "\n".join(services)
-            
+        return "\n".join(services) if services else "无可用MCP服务"
+
     async def cleanup(self):
         """清理所有MCP服务连接"""
         logger.info("正在清理MCP服务连接...")
@@ -408,7 +420,285 @@ class MCPManager:
         
         return None
 
-    def list_mcps(self): return list(MCP_REGISTRY.keys()) # 列出所有MCP服务 
+    def list_mcps(self): return list(MCP_REGISTRY.keys()) # 列出所有MCP服务
+
+    # 新增：统一调用接口
+    async def unified_call(self, service_name: str, tool_name: str, args: dict):
+        """
+        统一调用接口 - 支持MCP工具调用和Agent任务转交，严格分开
+        
+        Args:
+            service_name: 服务名称
+            tool_name: 工具名称
+            args: 调用参数
+        
+        Returns:
+            调用结果
+        """
+        from config import config
+        # 检查是否是Agent调用
+        if service_name in self.agent_services:
+            if tool_name == config.mcp.agent_tool_name:
+                return await self._call_agent(service_name, args)
+            else:
+                return {"status": "error", "message": f"Agent服务{service_name}只支持特殊工具名{config.mcp.agent_tool_name}"}
+        elif service_name in self.mcp_services:
+            # 普通MCP工具调用
+            return await self.call_service_tool(service_name, tool_name, args)
+        else:
+            return {"status": "error", "message": f"服务{service_name}未注册为MCP或Agent"}
+
+    async def _call_agent(self, agent_name: str, args: dict):
+        """
+        调用Agent处理任务
+        
+        Args:
+            agent_name: Agent名称
+            args: 任务参数
+        
+        Returns:
+            Agent处理结果
+        """
+        try:
+            # 从动态注册系统获取Agent实例
+            agent = get_agent_instance(agent_name)
+            if not agent:
+                raise ValueError(f"Agent {agent_name} 未找到")
+            
+            # 调用Agent的handle_handoff方法
+            if hasattr(agent, 'handle_handoff'):
+                result = await agent.handle_handoff(args)
+                return result
+            else:
+                raise ValueError(f"Agent {agent_name} 不支持handle_handoff方法")
+                
+        except Exception as e:
+            logger.error(f"调用Agent {agent_name} 失败: {e}")
+            return {"status": "error", "message": str(e)}
+
+    def register_agent_service(self, agent_name: str, agent_instance):
+        """
+        注册Agent为服务
+        
+        Args:
+            agent_name: Agent名称
+            agent_instance: Agent实例
+        """
+        from config import config
+        
+        # 注册到Agent服务池
+        self.agent_services[agent_name] = {
+            "type": "agent",
+            "agent_name": agent_name,
+            "instance": agent_instance,
+            "tools": [config.mcp.agent_tool_name],  # 支持agent工具名
+            "description": f"Agent服务: {agent_name}"
+        }
+        
+        # 更新服务类型映射
+        self.service_type_map[agent_name] = "agent"
+        
+        # 同时注册handoff服务
+        self.register_handoff(
+            service_name=agent_name,
+            tool_name=config.mcp.agent_tool_name,
+            tool_description=f"将任务转交给{agent_name}处理",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string"},
+                    "data": {"type": "object"}
+                }
+            },
+            agent_name=agent_name
+        )
+        
+        logger.info(f"注册Agent服务: {agent_name}")
+
+    def register_mcp_service(self, service_name: str, service_config: dict):
+        """
+        注册MCP服务
+        
+        Args:
+            service_name: 服务名称
+            service_config: 服务配置
+        """
+        # 注册到MCP服务池
+        self.mcp_services[service_name] = service_config
+        
+        # 更新服务类型映射
+        self.service_type_map[service_name] = "mcp"
+        
+        logger.info(f"注册MCP服务: {service_name}")
+
+    def get_service_type(self, service_name: str) -> str:
+        """
+        获取服务类型
+        
+        Args:
+            service_name: 服务名称
+        
+        Returns:
+            服务类型: "agent" 或 "mcp" 或 "unknown"
+        """
+        if service_name in self.agent_services:
+            return "agent"
+        elif service_name in self.mcp_services:
+            return "mcp"
+        else:
+            return "unknown"
+
+    def get_available_services_filtered(self) -> dict:
+        """
+        获取过滤后的可用服务列表，MCP服务和Agent服务彻底分开
+        """
+        from config import config
+        result = {
+            "mcp_services": [],
+            "agent_services": []
+        }
+        # MCP服务（排除已注册为Agent的服务）
+        for service_name, service_info in self.mcp_services.items():
+            if config.mcp.exclude_agent_tools_from_mcp and service_name in self.agent_services:
+                continue
+            result["mcp_services"].append({
+                "name": service_name,
+                "description": service_info.get("description", ""),
+                "type": "mcp"
+            })
+        # Agent服务
+        for agent_name, agent_info in self.agent_services.items():
+            result["agent_services"].append({
+                "name": agent_name,
+                "description": agent_info.get("description", ""),
+                "type": "agent",
+                "tool_name": config.mcp.agent_tool_name
+            })
+        return result
+
+    def auto_register_services(self):
+        """
+        自动注册所有服务，MCP服务和Agent服务彻底分开，使用agentType区分
+        """
+        from config import config
+        
+        # 清空现有服务，避免重复注册
+        self.agent_services.clear()
+        self.mcp_services.clear()
+        self.service_type_map.clear()
+        
+        # 自动注册Agent服务，并根据agentType决定是否注册为MCP服务
+        if config.mcp.auto_discover_agents:
+            for agent_name, manifest in dynamic_registry.agents.items():
+                try:
+                    agent_instance = get_agent_instance(agent_name)
+                    if agent_instance:
+                        # 读取agentType，默认"synchronous"
+                        agent_type = manifest.get("agentType", "synchronous").lower()
+                        self.register_agent_service(agent_name, agent_instance)
+                        print(f"✅ 注册Agent服务: {agent_name} (type: {agent_type})")
+                        # 只有agentType=="mcp"才注册为MCP服务
+                        if agent_type == "mcp":
+                            self.register_mcp_service(agent_name, {
+                                'type': 'dynamic',
+                                'manifest': manifest,
+                                'instance': agent_instance,
+                                'is_distributed': manifest.get('is_distributed', False),
+                                'server_id': manifest.get('server_id', None)
+                            })
+                            print(f"✅ 注册MCP服务: {agent_name}")
+                            # 注册handoff
+                            self.register_handoff(
+                                service_name=agent_name,
+                                tool_name=f"{agent_name}_handoff",
+                                tool_description=manifest.get('description', f'{agent_name}服务'),
+                                input_schema=manifest.get('inputSchema', {
+                                    "type": "object",
+                                    "properties": {
+                                        "action": {"type": "string", "description": "操作类型"},
+                                        "query": {"type": "string", "description": "查询内容"}
+                                    },
+                                    "required": ["action"]
+                                }),
+                                agent_name=agent_name,
+                                strict_schema=False
+                            )
+                    else:
+                        print(f"❌ 无法创建Agent实例: {agent_name}")
+                except Exception as e:
+                    print(f"❌ 注册Agent服务失败 {agent_name}: {e}")
+        
+        # 自动注册MCP服务（仅注册未被动态Agent覆盖的MCP工具服务）
+        if config.mcp.auto_discover_mcp:
+            for service_name, service_info in MCP_REGISTRY.items():
+                try:
+                    # 跳过已注册为Agent服务的（即动态Agent）
+                    if service_name in self.agent_services:
+                        continue
+                    self.register_mcp_service(service_name, service_info)
+                    print(f"✅ 注册MCP服务: {service_name}")
+                    manifest = service_info.get('manifest', {})
+                    self.register_handoff(
+                        service_name=service_name,
+                        tool_name=f"{service_name}_handoff",
+                        tool_description=manifest.get('description', f'{service_name}服务'),
+                        input_schema=manifest.get('inputSchema', {
+                            "type": "object",
+                            "properties": {
+                                "action": {"type": "string", "description": "操作类型"},
+                                "query": {"type": "string", "description": "查询内容"}
+                            },
+                            "required": ["action"]
+                        }),
+                        agent_name=service_name,
+                        strict_schema=False
+                    )
+                except Exception as e:
+                    print(f"❌ 注册MCP服务失败 {service_name}: {e}")
+        
+        print(f"🎉 自动注册完成 - Agent服务: {len(self.agent_services)}, MCP服务: {len(self.mcp_services)}")
+
+    def list_agent_services(self) -> list:
+        """
+        列出所有Agent服务
+        
+        Returns:
+            list: Agent服务列表
+        """
+        return list(self.agent_services.keys())
+
+    def list_mcp_services(self) -> list:
+        """
+        列出所有MCP服务
+        
+        Returns:
+            list: MCP服务列表
+        """
+        return list(self.mcp_services.keys())
+
+    def is_agent_service(self, service_name: str) -> bool:
+        """
+        检查是否是Agent服务
+        
+        Args:
+            service_name: 服务名称
+        
+        Returns:
+            bool: 是否是Agent服务
+        """
+        return service_name in self.agent_services
+
+    def is_mcp_service(self, service_name: str) -> bool:
+        """
+        检查是否是MCP服务
+        
+        Args:
+            service_name: 服务名称
+        
+        Returns:
+            bool: 是否是MCP服务
+        """
+        return service_name in self.mcp_services
 
 _MCP_MANAGER=None
 def get_mcp_manager():

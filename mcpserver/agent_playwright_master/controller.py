@@ -5,7 +5,8 @@ from config import config  # 使用新的配置系统
 import os
 from dotenv import load_dotenv
 from agents import Agent, AgentHooks, RunContextWrapper
-from .browser import PlaywrightBrowser
+# 移除循环导入，延迟导入
+# from .browser import PlaywrightBrowser
 
 load_dotenv()
 # 从config中获取API配置
@@ -148,10 +149,16 @@ class BrowserAgent:
         except Exception as e:
             return f"BrowserAgent处理失败: {str(e)}"
 
-BrowserAgent = Agent(
-    name="BrowserAgent",
-    instructions="你负责网页自动化操作，如打开、点击、输入、滚动、截图等。",
-    tools=[PlaywrightController],
-    hooks=BrowserAgentHooks(),
-    model=MODEL_NAME
-) 
+# 延迟创建BrowserAgent实例，避免循环导入
+def create_browser_agent():
+    """创建BrowserAgent实例的工厂函数"""
+    return Agent(
+        name="BrowserAgent",
+        instructions="你负责网页自动化操作，如打开、点击、输入、滚动、截图等。",
+        tools=[PlaywrightController],
+        hooks=BrowserAgentHooks(),
+        model=MODEL_NAME
+    )
+
+# 为了向后兼容，保留BrowserAgent变量
+BrowserAgent = create_browser_agent() 
