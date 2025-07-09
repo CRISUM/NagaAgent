@@ -9,7 +9,7 @@ from pathlib import Path
 import config # 顶部引入
 
 # 语言默认值（环境变量）
-DEFAULT_LANGUAGE = getattr(config, 'TTS_DEFAULT_LANGUAGE', 'en-US') # 统一配置
+DEFAULT_LANGUAGE = config.tts.default_language # 统一配置
 
 # OpenAI语音名与edge-tts语音名映射
 voice_mapping = {

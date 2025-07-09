@@ -150,6 +150,7 @@ GRAG_NEO4J_PASSWORD = "your_password"  # Neo4j密码
 - **前端换行符自动适配，无论后端返回`\n`还是`\\n`，PyQt界面都能正确分行显示**
 - **所有Agent的注册元数据已集中在`mcpserver/mcp_registry.py`，主流程和管理器极简，扩展维护更方便。只需维护一处即可批量注册/扩展所有Agent服务。**
 - **自动注册/热插拔Agent机制，新增/删除Agent只需增删py文件，无需重启主程序**
+- **Agent Manifest标准化**，统一的`agent-manifest.json`格式，支持完整的字段验证和类型检查
 - 聊天窗口支持**Markdown语法**，包括标题、粗体、斜体、代码块、表格、图片等。
 
 ---
@@ -174,7 +175,11 @@ NagaAgent/
 ├── mcpserver/
 │   ├── mcp_manager.py          # MCP服务管理
 │   ├── mcp_registry.py         # Agent注册与schema元数据
+│   ├── dynamic_agent_registry.py # 动态Agent注册系统
+│   ├── AGENT_MANIFEST_TEMPLATE.json # Agent manifest模板
+│   ├── MANIFEST_STANDARDIZATION.md # Manifest标准化规范
 │   ├── agent_xxx/              # 各类自定义Agent（如file、coder、browser等）
+│   │   └── agent-manifest.json # Agent配置文件
 ├── pyproject.toml              # 项目配置和依赖
 ├── setup.ps1                   # Windows配置脚本
 ├── start.bat                   # Windows启动脚本
@@ -275,6 +280,45 @@ await s.mcp.handoff(
   task={"action": "run", "file": "main.py"}
 )
 ```
+
+## 📋 Agent Manifest标准化
+
+### 标准化规范
+所有Agent必须使用标准化的`agent-manifest.json`配置文件，确保一致性和可维护性。
+
+#### 必需字段
+- `name`: Agent唯一标识符
+- `displayName`: 显示名称
+- `version`: 版本号（x.y.z格式）
+- `description`: 功能描述
+- `author`: 作者或模块名称
+- `agentType`: Agent类型（mcp/synchronous/asynchronous）
+- `entryPoint`: 入口点配置（module和class）
+
+#### 可选字段
+- `factory`: 工厂函数配置
+- `communication`: 通信配置
+- `capabilities`: 能力描述
+- `inputSchema`: 输入模式定义
+- `configSchema`: 配置模式定义
+- `runtime`: 运行时信息
+
+### 验证和测试
+```bash
+# 验证所有manifest文件
+python test_manifest_standardization.py
+```
+
+### 模板和文档
+- 模板文件：`mcpserver/AGENT_MANIFEST_TEMPLATE.json`
+- 规范文档：`mcpserver/MANIFEST_STANDARDIZATION.md`
+- 动态注册系统：`mcpserver/dynamic_agent_registry.py`
+
+### 创建新Agent
+1. 复制模板文件到Agent目录
+2. 修改字段内容
+3. 运行验证脚本检查格式
+4. 重启系统自动注册
 
 ---
 

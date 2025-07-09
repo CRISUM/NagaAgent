@@ -9,6 +9,11 @@ from config import config  # 使用统一配置系统
 API_KEY = config.tts.api_key
 REQUIRE_API_KEY = config.tts.require_api_key
 
+def getenv_bool(key: str, default: bool = False) -> bool:
+    """从环境变量获取布尔值"""
+    value = os.getenv(key, str(default)).lower()
+    return value in ('true', '1', 'yes', 'on')
+
 def require_api_key(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):

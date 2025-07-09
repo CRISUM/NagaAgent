@@ -99,14 +99,18 @@ def start_tts_server():
         if not check_tts_port_available(config.tts.port):
             print(f"⚠️ 端口 {config.tts.port} 已被占用，跳过TTS服务启动")
             return
-        import subprocess
+        
         print("🚀 正在启动TTS服务...")
         print(f"📍 地址: http://127.0.0.1:{config.tts.port}")
+        
         def run_tts():
             try:
-                subprocess.Popen([sys.executable, os.path.join(os.path.dirname(__file__), 'voice', 'server.py')])
+                # 使用新的启动脚本
+                from voice.start_voice_service import start_http_server
+                start_http_server()
             except Exception as e:
                 print(f"❌ TTS服务启动失败: {e}")
+        
         tts_thread = threading.Thread(target=run_tts, daemon=True)
         tts_thread.start()
         print("✅ TTS服务已在后台启动")

@@ -45,11 +45,11 @@ SENTENCE_END_PUNCTUATIONS = r"[。？！；\.\?\!\;]"
 
 # load_dotenv()  # 移除，使用主系统配置
 
-API_KEY = config.TTS_API_KEY # 统一配置
-PORT = config.TTS_PORT
-DEFAULT_VOICE = config.TTS_DEFAULT_VOICE
-DEFAULT_RESPONSE_FORMAT = getattr(config, 'TTS_DEFAULT_FORMAT', 'wav')
-DEFAULT_SPEED = config.TTS_DEFAULT_SPEED
+API_KEY = config.tts.api_key # 统一配置
+PORT = config.tts.port
+DEFAULT_VOICE = config.tts.default_voice
+DEFAULT_RESPONSE_FORMAT = config.tts.default_format
+DEFAULT_SPEED = config.tts.default_speed
 
 REMOVE_FILTER = getenv_bool('REMOVE_FILTER', False)
 EXPAND_API = getenv_bool('EXPAND_API', True)

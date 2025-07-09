@@ -1,4 +1,16 @@
-# OpenAI兼容的 Edge-TTS API 🗣️
+# NagaAgent 语音服务 🗣️
+
+基于Edge-TTS的OpenAI兼容语音合成服务，为NagaAgent提供高质量的文本转语音功能。
+
+## 功能特性
+
+- **OpenAI兼容接口**：`/v1/audio/speech`，请求结构和行为与OpenAI类似
+- **支持多种语音**：将OpenAI语音（alloy, echo, fable, onyx, nova, shimmer）映射到`edge-tts`语音
+- **多音频格式**：支持多种音频格式（mp3, opus, aac, flac, wav, pcm）
+- **可调节语速**：支持0.25x到4.0x的播放速度
+- **可选直接指定edge-tts语音**：既可用OpenAI语音映射，也可直接指定任意edge-tts语音
+- **HTTP和WebSocket双模式**：支持REST API和实时WebSocket连接
+- **统一配置管理**：与NagaAgent主系统配置完全集成
 
 ![GitHub stars](https://img.shields.io/github/stars/travisvn/openai-edge-tts?style=social)
 ![GitHub forks](https://img.shields.io/github/forks/travisvn/openai-edge-tts?style=social)
@@ -28,104 +40,85 @@
 
 ### 前置条件
 
-- **Docker**（推荐）：建议用 Docker 和 Docker Compose 部署。
-- **Python**（可选）：本地开发可用，需安装 `pyproject.toml` 中的依赖。
-- **ffmpeg**（可选）：音频格式转换需要。只用mp3可不装。
+- **Python 3.8+**：确保Python环境已安装
+- **依赖包**：安装项目依赖 `pip install -r requirements.txt`
+- **ffmpeg**（可选）：音频格式转换需要，只用mp3可不装
 
-### 安装步骤
+### 配置说明
 
-1. **克隆仓库**：
+语音服务配置在 `config.json` 文件的 `tts` 部分：
+
+```json
+{
+  "tts": {
+    "api_key": "your_api_key_here",
+    "port": 5050,
+    "default_voice": "en-US-AvaNeural",
+    "default_format": "mp3",
+    "default_speed": 1.0,
+    "default_language": "en-US",
+    "remove_filter": false,
+    "expand_api": true,
+    "require_api_key": true
+  }
+}
+```
+
+### 启动方式
+
+#### 方式1：通过NagaAgent主程序自动启动
 ```bash
-git clone https://github.com/travisvn/openai-edge-tts.git
-cd openai-edge-tts
+python main.py
 ```
+主程序会自动启动语音服务。
 
-2. **环境变量**：在根目录创建 `.env` 文件，内容如下：
-```
-API_KEY=your_api_key_here
-PORT=5050
-
-DEFAULT_VOICE=en-US-AvaNeural
-DEFAULT_RESPONSE_FORMAT=mp3
-DEFAULT_SPEED=1.0
-
-DEFAULT_LANGUAGE=en-US
-
-REQUIRE_API_KEY=True
-REMOVE_FILTER=False
-EXPAND_API=True
-```
-
-或直接复制默认 `.env.example`：
+#### 方式2：独立启动语音服务
 ```bash
-cp .env.example .env
+# 启动HTTP服务器
+python voice/start_voice_service.py --mode http
+
+# 启动WebSocket服务器
+python voice/start_voice_service.py --mode websocket
+
+# 同时启动两种模式
+python voice/start_voice_service.py --mode both
+
+# 检查依赖
+python voice/start_voice_service.py --check-deps
+
+# 自定义端口
+python voice/start_voice_service.py --port 8080
 ```
 
-## 用 Python 运行
-
-如需直接用 Python 运行，按以下步骤配置虚拟环境、安装依赖并启动服务。
-
-### 1. 克隆仓库
-
+#### 方式3：直接启动服务器
 ```bash
-git clone https://github.com/travisvn/openai-edge-tts.git
-cd openai-edge-tts
+# HTTP服务器
+python voice/server.py
+
+# WebSocket服务器
+python voice/websocket_edge_tts.py
 ```
 
-### 2. 创建虚拟环境
+## 服务状态检查
 
-建议用虚拟环境隔离依赖：
-
+### 检查服务状态
 ```bash
-# macOS/Linux
-python3 -m venv venv
-source venv/bin/activate
-
-# Windows
-python -m venv venv
-venv\Scripts\activate
+python voice/voice_status.py
 ```
 
-### 3. 安装依赖
-
-用 `pip` 安装依赖：
-
+### 测试TTS功能
 ```bash
-uv sync --extra audio  # 或 pip install -e .
+curl -X POST http://127.0.0.1:5050/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your_api_key_here" \
+  -d '{
+    "input": "Hello, this is a test.",
+    "voice": "alloy",
+    "response_format": "mp3",
+    "speed": 1.0
+  }' \
+  --output test_speech.mp3
 ```
-
-### 4. 配置环境变量
-
-在根目录创建 `.env` 文件，内容如下：
-
-```plaintext
-API_KEY=your_api_key_here
-PORT=5050
-
-DEFAULT_VOICE=en-US-AvaNeural
-DEFAULT_RESPONSE_FORMAT=mp3
-DEFAULT_SPEED=1.0
-
-DEFAULT_LANGUAGE=en-US
-
-REQUIRE_API_KEY=True
-REMOVE_FILTER=False
-EXPAND_API=True
-```
-
-### 5. 启动服务
-
-配置好后，运行：
-
-```bash
-python app/server.py
-```
-
-服务将运行在 `http://localhost:5050`。
-
-### 6. 测试API
-
-现在可以通过 `http://localhost:5050/v1/audio/speech` 及其它接口访问API。请求示例见[用法](#usage)部分。
 
 ### 用法
 
