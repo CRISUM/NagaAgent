@@ -11,14 +11,11 @@ import sys
 import json
 import traceback
 import time # 时间戳打印
-from mcpserver.mcp_registry import register_all_handoffs # 导入批量注册方法
-import websockets 
 import re # 添加re模块导入
 from typing import List, Dict # 修复List未导入
 from thinking import TreeThinkingEngine # 树状思考引擎
 from thinking.config import COMPLEX_KEYWORDS # 复杂关键词
 from config import config
-from mcpserver.dynamic_agent_registry import dynamic_registry # 动态注册系统
 
 # GRAG记忆系统导入
 if config.grag.enabled:
@@ -51,15 +48,13 @@ logging.basicConfig(
 # 特别设置httpcore和openai的日志级别，减少连接异常噪音
 logging.getLogger("httpcore.connection").setLevel(logging.WARNING)
 logging.getLogger("openai._base_client").setLevel(logging.WARNING)
-# 隐藏动态注册系统的DEBUG日志
-logging.getLogger("mcpserver.dynamic_agent_registry").setLevel(logging.WARNING)
 # 隐藏asyncio的DEBUG日志
 logging.getLogger("asyncio").setLevel(logging.WARNING)
 logger = logging.getLogger("NagaConversation")
 
 # _MCP_HANDOFF_REGISTERED=False  # 已移除，不再需要
 _TREE_THINKING_SUBSYSTEMS_INITIALIZED=False
-_DYNAMIC_REGISTRY_INITIALIZED=False
+_MCP_SERVICES_INITIALIZED=False
 
 class NagaConversation: # 对话主类
     def __init__(self):
@@ -69,14 +64,25 @@ class NagaConversation: # 对话主类
         self.client = OpenAI(api_key=config.api.api_key, base_url=config.api.base_url.rstrip('/') + '/')
         self.async_client = AsyncOpenAI(api_key=config.api.api_key, base_url=config.api.base_url.rstrip('/') + '/')
         
-        # 初始化动态注册系统
-        self._init_dynamic_registry()
+        # 初始化MCP服务系统
+        self._init_mcp_services()
         
         # 初始化GRAG记忆系统（只在首次初始化时显示日志）
         self.memory_manager = memory_manager
         if self.memory_manager and not hasattr(self.__class__, '_memory_initialized'):
             logger.info("夏园记忆系统已初始化")
             self.__class__._memory_initialized = True
+        
+        # 初始化语音处理系统
+        self.voice = None
+        if config.system.voice_enabled:
+            try:
+                from voice.input.voice_handler import VoiceHandler
+                self.voice = VoiceHandler()
+                logger.info("语音处理系统已初始化")
+            except Exception as e:
+                logger.warning(f"语音处理系统初始化失败: {e}")
+                self.voice = None
         
         # 集成树状思考系统（参考handoff的全局变量保护机制）
         global _TREE_THINKING_SUBSYSTEMS_INITIALIZED
@@ -95,55 +101,20 @@ class NagaConversation: # 对话主类
             except Exception as e:
                 logger.warning(f"树状思考系统实例创建失败: {e}")
                 self.tree_thinking = None
-        
-        # 移除重复的handoff注册，统一在_init_services中处理
-        # global _MCP_HANDOFF_REGISTERED
-        # if not _MCP_HANDOFF_REGISTERED:
-        #     try:
-        #         logger.info("开始注册所有Agent handoff处理器...")
-        #         register_all_handoffs(self.mcp)  # 一键注册所有Agent
-        #         logger.info("成功注册所有Agent handoff处理器")
-        #         _MCP_HANDOFF_REGISTERED = True
-        #     except Exception as e:
-        #         logger.error(f"注册Agent handoff处理器失败: {e}")
-        #         traceback.print_exc(file=sys.stderr)
 
-    def _init_dynamic_registry(self):
-        """初始化动态注册系统"""
-        global _DYNAMIC_REGISTRY_INITIALIZED
-        if _DYNAMIC_REGISTRY_INITIALIZED:
-            logger.debug("动态注册系统已初始化，跳过重复初始化")
+    def _init_mcp_services(self):
+        """初始化MCP服务系统（只在首次初始化时输出日志，后续静默）"""
+        global _MCP_SERVICES_INITIALIZED
+        if _MCP_SERVICES_INITIALIZED:
+            # 静默跳过，不输出任何日志
             return
-            
-        import asyncio
         try:
-            # 检查是否已有事件循环
-            try:
-                loop = asyncio.get_running_loop()
-                # 如果已有事件循环，使用create_task
-                loop.create_task(self._init_services())
-            except RuntimeError:
-                # 如果没有事件循环，创建新的
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(self._init_services())
-                loop.close()
-            logger.info("动态注册系统初始化完成")
-            _DYNAMIC_REGISTRY_INITIALIZED = True
+            # 自动注册所有MCP服务和handoff
+            self.mcp.auto_register_services()
+            logger.info("MCP服务系统初始化完成")
+            _MCP_SERVICES_INITIALIZED = True
         except Exception as e:
-            logger.error(f"动态注册系统初始化失败: {e}")
-
-    async def _init_services(self):
-        """初始化所有服务"""
-        # 1. 发现Agent
-        await dynamic_registry.discover_agents()
-        
-        # 2. 自动注册所有服务
-        self.mcp.auto_register_services()
-        
-        # 3. 注册handoff服务（向后兼容）
-        from mcpserver.mcp_registry import register_all_handoffs
-        register_all_handoffs(self.mcp)
+            logger.error(f"MCP服务系统初始化失败: {e}")
 
     def save_log(self, u, a):  # 保存对话日志
         if self.dev_mode:
@@ -202,7 +173,7 @@ class NagaConversation: # 对话主类
 
     # 工具调用循环相关方法
     def _parse_tool_calls(self, content: str) -> list:
-        """解析TOOL_REQUEST格式的工具调用"""
+        """解析TOOL_REQUEST格式的工具调用，支持MCP和Agent两种类型"""
         tool_calls = []
         tool_request_start = "<<<[TOOL_REQUEST]>>>"
         tool_request_end = "<<<[END_TOOL_REQUEST]>>>"
@@ -216,18 +187,51 @@ class NagaConversation: # 对话主类
                 start_index = start_pos + len(tool_request_start)
                 continue
             tool_content = content[start_pos + len(tool_request_start):end_pos].strip()
-            tool_name = None
+            
+            # 先解析所有参数
             tool_args = {}
             param_pattern = r'(\w+)\s*:\s*「始」([\s\S]*?)「末」'
             for match in re.finditer(param_pattern, tool_content):
                 key = match.group(1)
                 value = match.group(2).strip()
-                if key == 'tool_name':
-                    tool_name = value
-                else:
-                    tool_args[key] = value
-            if tool_name:
-                tool_calls.append({'name': tool_name, 'args': tool_args})
+                tool_args[key] = value
+            
+            # 判断调用类型
+            agent_type = tool_args.get('agentType', 'mcp').lower()
+            
+            if agent_type == 'agent':
+                # Agent类型调用格式
+                agent_name = tool_args.get('agent_name')
+                prompt = tool_args.get('prompt')
+                if agent_name and prompt:
+                    tool_calls.append({
+                        'name': 'agent_call',
+                        'args': {
+                            'agentType': 'agent',
+                            'agent_name': agent_name,
+                            'prompt': prompt
+                        }
+                    })
+            else:
+                # MCP类型调用格式（包括默认mcp和旧格式）
+                tool_name = tool_args.get('tool_name')
+                if tool_name:
+                    # 新格式：有service_name
+                    if 'service_name' in tool_args:
+                        tool_calls.append({
+                            'name': tool_name,
+                            'args': tool_args
+                        })
+                    else:
+                        # 旧格式：tool_name作为服务名
+                        service_name = tool_name
+                        tool_args['service_name'] = service_name
+                        tool_args['agentType'] = 'mcp'
+                        tool_calls.append({
+                            'name': tool_name,
+                            'args': tool_args
+                        })
+            
             start_index = end_pos + len(tool_request_end)
         return tool_calls
 
@@ -239,25 +243,46 @@ class NagaConversation: # 对话主类
                 # 解析工具调用格式
                 tool_name = tool_call['name']
                 args = tool_call['args']
+                agent_type = args.get('agentType', 'mcp').lower()
                 
-                # 检查是否是新的统一调用格式
-                if 'service_name' in args and 'tool_name' in args:
-                    # 新的统一调用格式
-                    service_name = args['service_name']
-                    actual_tool_name = args['tool_name']
-                    tool_args = {k: v for k, v in args.items() if k not in ['service_name', 'tool_name']}
-                    
-                    result = await self.mcp.unified_call(
-                        service_name=service_name,
-                        tool_name=actual_tool_name,
-                        args=tool_args
-                    )
+                # 根据agentType分流处理
+                if agent_type == 'agent':
+                    # Agent类型：交给AgentManager处理
+                    try:
+                        from mcpserver.agent_manager import get_agent_manager
+                        agent_manager = get_agent_manager()
+                        
+                        agent_name = args.get('agent_name')
+                        prompt = args.get('prompt')
+                        
+                        if not agent_name or not prompt:
+                            result = "Agent调用失败: 缺少agent_name或prompt参数"
+                        else:
+                            # 直接调用Agent
+                            result = await agent_manager.call_agent(agent_name, prompt)
+                            if result.get("status") == "success":
+                                result = result.get("result", "")
+                            else:
+                                result = f"Agent调用失败: {result.get('error', '未知错误')}"
+                                
+                    except Exception as e:
+                        result = f"Agent调用失败: {str(e)}"
+                        
                 else:
-                    # 旧的handoff格式（向后兼容）
-                    result = await self.mcp.handoff(
-                        service_name=tool_name,
-                        task=args
-                    )
+                    # MCP类型：走handoff流程
+                    service_name = args.get('service_name')
+                    actual_tool_name = args.get('tool_name', tool_name)
+                    tool_args = {k: v for k, v in args.items() 
+                               if k not in ['service_name', 'tool_name', 'agentType']}
+                    
+                    if not service_name:
+                        result = "MCP调用失败: 缺少service_name参数"
+                    else:
+                        result = await self.mcp.unified_call(
+                            service_name=service_name,
+                            tool_name=actual_tool_name,
+                            args=tool_args
+                        )
                 
                 results.append(f"来自工具 \"{tool_name}\" 的结果:\n{result}")
             except Exception as e:
@@ -308,21 +333,52 @@ class NagaConversation: # 对话主类
         for service in mcp_services:
             name = service.get("name", "")
             description = service.get("description", "")
+            display_name = service.get("display_name", name)
+            tools = service.get("available_tools", [])
+            tool_names = [tool.get('name', '') for tool in tools if tool.get('name')]
+            # 展示name+displayName
             if description:
                 mcp_list.append(f"- {name}: {description}")
+                if tool_names:
+                    mcp_list.append(f"  可用工具: {', '.join(tool_names)}")
             else:
                 mcp_list.append(f"- {name}")
         
         # 格式化Agent服务列表
         agent_list = []
+        
+        # 1. 添加handoff服务
         for service in agent_services:
             name = service.get("name", "")
             description = service.get("description", "")
             tool_name = service.get("tool_name", "agent")
+            display_name = service.get("display_name", name)
+            # 展示name+displayName
             if description:
-                agent_list.append(f"- {name} (工具名: {tool_name}): {description}")
+                agent_list.append(f"- {name}(工具名: {tool_name}): {description}")
             else:
-                agent_list.append(f"- {name} (工具名: {tool_name})")
+                agent_list.append(f"- {name}(工具名: {tool_name})")
+        
+        # 2. 直接从AgentManager获取已注册的Agent
+        try:
+            from mcpserver.agent_manager import get_agent_manager
+            agent_manager = get_agent_manager()
+            agent_manager_agents = agent_manager.get_available_agents()
+            
+            for agent in agent_manager_agents:
+                name = agent.get("name", "")
+                base_name = agent.get("base_name", "")
+                description = agent.get("description", "")
+                
+                # 展示格式：base_name: 描述
+                if description:
+                    agent_list.append(f"- {base_name}: {description}")
+                else:
+                    agent_list.append(f"- {base_name}")
+                    
+        except Exception as e:
+            # 如果AgentManager不可用，静默处理
+            pass
         
         # 返回格式化的服务列表
         result = {
@@ -508,22 +564,3 @@ async def process_user_message(s,msg):
                 break
         return await s.process(msg, is_voice_input=True)  # 语音输入
     return await s.process(msg, is_voice_input=False)  # 文字输入
-
-async def send_ai_message(s, msg):
-    # 启用语音时，通过WebSocket流式推送到voice/genVoice服务
-    if config.system.voice_enabled:
-        ws_url = f"ws://127.0.0.1:{config.tts.port}/genVoice"  # WebSocket服务地址
-        try:
-            async with websockets.connect(ws_url) as websocket:
-                await websocket.send(msg)  # 发送文本到TTS服务
-                while True:
-                    response = await websocket.recv()  # 接收音频流（json）
-                    data = json.loads(response)
-                    # data结构: {"seq":..., "text":..., "wav_base64":..., "duration":...}
-                    # 这里可以推送data到前端或本地播放器
-                    print(f"收到音频片段: 序号{data['seq']}，时长{data['duration']}秒")  # 示例：打印信息
-                    # 如需流式返回，可 yield data
-                    # 可根据需求break或继续接收
-        except Exception as e:
-            print(f"WebSocket TTS服务调用异常: {e}")
-    return msg  # 始终返回文本

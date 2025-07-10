@@ -6,8 +6,8 @@ from config import DEBUG # 导入全局DEBUG配置
 import requests # 用于同步获取IP和城市
 import re # 用于正则解析
 from datetime import datetime, timedelta # 用于日期处理
-import asyncio # 导入asyncio模块
 IPIP_URL = "https://myip.ipip.net/" # 统一配置
+from .city_code_map import CITY_CODE_MAP # 导入城市编码表
 
 class WeatherTimeTool:
     """天气和时间工具类"""
@@ -46,165 +46,54 @@ class WeatherTimeTool:
     async def _preload_ip_info(self):
         pass # 兼容保留，不再异步获取IP
 
-    async def get_weather(self, city):
-        """获取指定城市天气"""
-        url = f'https://wttr.in/{city}?format=j1'
+    async def get_weather(self, province, city):
+        """调用高德地图天气接口，city参数为编码，返回原始json并替换reporttime为系统时间"""  # 右侧注释
+        url = f'https://restapi.amap.com/v3/weather/weatherInfo?city={city}&key=06e5619c6e787a67ae4b9f177ab48fe2'
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
-                data = await resp.json()
+                data = await resp.json(content_type=None)
+                # 替换reporttime为系统当前时间 # 右侧注释
+                if data.get('lives') and isinstance(data['lives'], list):
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    for live in data['lives']:
+                        if isinstance(live, dict):
+                            live['reporttime'] = current_time
                 return data
 
-    def parse_weather_query(self, query, city, weather_data):
-        """
-        根据用户query和天气数据，返回对应的天气信息
-        支持当前、明天、后天、未来N天、指定日期、日出日落、最高温、最低温、风力、湿度、时间等
-        """
-        # 0. 时间查询
-        if re.search(r'(时间|几点|now|current time|time)', query):
-            # 优先用localObsDateTime字段
-            try:
-                local_time = weather_data['current_condition'][0].get('localObsDateTime')
-                if local_time:
-                    return f'{city}当前时间：{local_time}'
-            except Exception:
-                pass
-            # 兜底：用observation_time字段
-            try:
-                obs_time = weather_data['current_condition'][0].get('observation_time')
-                if obs_time:
-                    return f'{city}观测时间：{obs_time}'
-            except Exception:
-                pass
-            return f'{city}未能获取到当前时间信息'
-
-        # 1. 当前天气
-        if not query or re.search(r'(现在|当前|实时|today|current)', query):
-            current = weather_data['current_condition'][0]
-            desc = current['weatherDesc'][0]['value']
-            temp = current['temp_C']
-            feels = current['FeelsLikeC']
-            wind = current['windspeedKmph']
-            return f'{city}当前天气：{desc}，温度{temp}℃，体感{feels}℃，风速{wind}km/h'
-
-        # 2. 明天天气
-        if re.search(r'(明天|tomorrow)', query):
-            if len(weather_data['weather']) > 1:
-                tomorrow = weather_data['weather'][1]
-                desc = tomorrow['hourly'][4]['weatherDesc'][0]['value']  # 取中午12点
-                temp = tomorrow['avgtempC']
-                return f'{city}明天天气：{desc}，平均温度{temp}℃'
-            else:
-                return f'{city}暂无明天天气数据'
-
-        # 3. 后天天气
-        if re.search(r'(后天|day after tomorrow)', query):
-            if len(weather_data['weather']) > 2:
-                after = weather_data['weather'][2]
-                desc = after['hourly'][4]['weatherDesc'][0]['value']
-                temp = after['avgtempC']
-                return f'{city}后天天气：{desc}，平均温度{temp}℃'
-            else:
-                return f'{city}暂无后天天气数据'
-
-        # 4. 未来N天
-        match = re.search(r'未来(\d+)天', query)
-        if match:
-            n = int(match.group(1))
-            n = min(n, len(weather_data['weather']))
-            result = [f'{city}未来{n}天天气：']
-            for i in range(n):
-                day = weather_data['weather'][i]
-                date = day['date']
-                desc = day['hourly'][4]['weatherDesc'][0]['value']
-                temp = day['avgtempC']
-                result.append(f'{date}：{desc}，平均温度{temp}℃')
-            return '\n'.join(result)
-
-        # 5. 某天的天气（如"6月10日"）
-        date_match = re.search(r'(\d{1,2})月(\d{1,2})日', query)
-        if date_match:
-            month = int(date_match.group(1))
-            day = int(date_match.group(2))
-            for d in weather_data['weather']:
-                d_date = datetime.strptime(d['date'], '%Y-%m-%d')
-                if d_date.month == month and d_date.day == day:
-                    desc = d['hourly'][4]['weatherDesc'][0]['value']
-                    temp = d['avgtempC']
-                    return f'{city}{month}月{day}日天气：{desc}，平均温度{temp}℃'
-
-        # 6. 日出日落
-        if re.search(r'(日出|sunrise)', query):
-            today = weather_data['weather'][0]
-            sunrise = today['astronomy'][0]['sunrise']
-            return f'{city}今天日出时间：{sunrise}'
-        if re.search(r'(日落|sunset)', query):
-            today = weather_data['weather'][0]
-            sunset = today['astronomy'][0]['sunset']
-            return f'{city}今天日落时间：{sunset}'
-
-        # 7. 最高温/最低温
-        if re.search(r'(最高温|high)', query):
-            today = weather_data['weather'][0]
-            return f'{city}今天最高温：{today.get("maxtempC", "-")}℃'
-        if re.search(r'(最低温|low)', query):
-            today = weather_data['weather'][0]
-            return f'{city}今天最低温：{today.get("mintempC", "-")}℃'
-
-        # 8. 风力/湿度等专项
-        if re.search(r'(风|wind)', query):
-            current = weather_data['current_condition'][0]
-            wind = current['windspeedKmph']
-            return f'{city}当前风速：{wind}km/h'
-        if re.search(r'(湿度|humidity)', query):
-            current = weather_data['current_condition'][0]
-            humidity = current['humidity']
-            return f'{city}当前湿度：{humidity}%'
-
-        # 兜底：返回当前天气
-        current = weather_data['current_condition'][0]
-        desc = current['weatherDesc'][0]['value']
-        temp = current['temp_C']
-        feels = current['FeelsLikeC']
-        wind = current['windspeedKmph']
-        return f'{city}当前天气：{desc}，温度{temp}℃，体感{feels}℃，风速{wind}km/h'
-
     async def handle(self, action=None, ip=None, city=None, query=None, format=None, **kwargs):
-        """统一处理入口，兼容query/format等参数"""
-        # 如果未指定城市，优先用本地预加载城市
-        if not city:
-            city = getattr(self, '_local_city', '') or ''
-        if not action:
-            if query:
-                if 'time' in query or '时间' in query:
-                    action = 'time'
-                elif 'weather' in query or '天气' in query:
-                    action = 'weather'
-            elif format:
-                if 'time' in format or '时间' in format:
-                    action = 'time'
-                elif 'weather' in format or '天气' in format:
-                    action = 'weather'
-        # 1. 获取IP和城市（优先用缓存）
-        ip_info = self._ip_info or {} # 不再异步获取IP
-        if not city:
-            city = ip_info.get('city', '')
-        if not ip:
-            ip = ip_info.get('query', '')
-        timezone = ip_info.get('timezone', 'Asia/Shanghai')
-        # 2. 根据action处理
+        """统一处理入口，自动查表获取城市编码，API用编码，返回原始数据"""  # 右侧注释
+        # city为'auto'或空时自动用本地城市 # 右侧注释
+        if city in [None, '', 'auto']:
+            city_str = getattr(self, '_local_city', '') or ''
+        else:
+            city_str = city
+        if city_str.startswith('中国'):
+            city_str = city_str[2:].strip()
+        province, city_name = city_str, city_str
+        if city_str:
+            match = re.match(r"^([\u4e00-\u9fa5]+) ([\u4e00-\u9fa5]+)$", city_str)
+            if match:
+                province = match.group(1)
+                city_name = match.group(2)
+            else:
+                parts = city_str.split()
+                if len(parts) >= 2:
+                    province = parts[-2]
+                    city_name = parts[-1]
+                else:
+                    province = city_str
+                    city_name = city_str
+        # 新增：查表获取编码 # 右侧注释
+        city_code = CITY_CODE_MAP.get(city_name) or CITY_CODE_MAP.get(province)
+        if not city_code:
+            return {'status': 'error', 'message': f'未找到城市编码: {city_name}'}
         if action in ['weather', 'get_weather', 'current_weather', 'time', 'get_time', 'current_time']:
-            if not city:
-                return {'status': 'error', 'message': '未能识别城市'}
-            weather = await self.get_weather(city)
-            try:
-                msg = self.parse_weather_query(query or '', city, weather) # 自动解析意图
-                return {
-                    'status': 'ok',
-                    'message': msg,
-                    'data': weather
-                }
-            except Exception:
-                return {'status': 'error', 'message': '天气API返回异常', 'data': weather}
+            weather = await self.get_weather(province, city_code)
+            return {
+                'status': 'ok',
+                'message': 'API原始数据',
+                'data': weather
+            }
         else:
             return {'status': 'error', 'message': f'未知操作: {action}'}
 
@@ -255,30 +144,3 @@ class WeatherTimeAgent(Agent):
             return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return json.dumps({"status": "error", "message": str(e), "data": {}}, ensure_ascii=False)
-
-# 工厂函数：动态创建Agent实例
-def create_weather_time_agent():
-    """创建WeatherTimeAgent实例"""
-    return WeatherTimeAgent()
-
-# 获取Agent元数据
-def get_agent_metadata():
-    """获取Agent元数据"""
-    import os
-    manifest_path = os.path.join(os.path.dirname(__file__), "agent-manifest.json")
-    try:
-        with open(manifest_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"加载元数据失败: {e}")
-        return None
-
-# 验证配置
-def validate_agent_config(config):
-    """验证Agent配置"""
-    return True
-
-# 获取依赖
-def get_agent_dependencies():
-    """获取Agent依赖"""
-    return ["aiohttp", "requests"]

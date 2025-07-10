@@ -1,130 +1,223 @@
-# mcp_registry.py # 自动注册所有MCP服务和handoff schema
-# 
-# 架构说明：
-# 基于动态注册系统 - 通过agent-manifest.json定义Agent元数据，支持动态加载和热插拔
-# 所有Agent都通过agent-manifest.json文件进行动态注册
-
-import importlib, inspect, os, json
+# mcp_registry.py # 动态扫描JSON元数据文件注册MCP服务
+import json
+import os
+import importlib
+import inspect
 from pathlib import Path
-import concurrent.futures # 新增线程池支持
-from mcpserver.dynamic_agent_registry import dynamic_registry
+import sys
+from typing import Dict, Any, Optional, List
 
 MCP_REGISTRY = {} # 全局MCP服务池
+MANIFEST_CACHE = {} # 缓存manifest信息
 
-async def auto_register_mcp(mcp_dir='mcpserver'):
-    """使用动态注册系统自动注册所有MCP服务"""
-    print("🔄 使用动态注册系统发现Agent...")
-    
-    # 使用动态注册系统发现Agent
-    await dynamic_registry.discover_agents()
-    
-    # 将动态注册的Agent同步到MCP_REGISTRY
-    for agent_name, manifest in dynamic_registry.agents.items():
-        try:
-            # 获取Agent实例（延迟初始化）
-            instance = dynamic_registry.get_agent_instance(agent_name)
+def load_manifest_file(manifest_path: Path) -> Optional[Dict[str, Any]]:
+    """加载manifest文件"""
+    try:
+        with open(manifest_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        sys.stderr.write(f"加载manifest文件失败 {manifest_path}: {e}\n")
+        return None
+
+def create_agent_instance(manifest: Dict[str, Any]) -> Optional[Any]:
+    """根据manifest创建agent实例"""
+    try:
+        entry_point = manifest.get('entryPoint', {})
+        module_name = entry_point.get('module')
+        class_name = entry_point.get('class')
+        
+        if not module_name or not class_name:
+            sys.stderr.write(f"manifest缺少entryPoint信息: {manifest.get('name', 'unknown')}\n")
+            return None
             
-            if instance:
-                MCP_REGISTRY[agent_name] = {
-                    'type': 'dynamic',
-                    'manifest': manifest,
-                    'instance': instance,
-                    'is_distributed': manifest.get('is_distributed', False),
-                    'server_id': manifest.get('server_id', None)
-                }
-                print(f"✅ 动态注册Agent: {agent_name}")
-            else:
-                print(f"❌ 动态注册Agent失败: {agent_name} - 无法创建实例")
-                
-        except Exception as e:
-            print(f"❌ 动态注册Agent {agent_name} 失败: {e}")
-    
-    print(f"🎉 动态注册完成，共注册 {len(dynamic_registry.agents)} 个Agent")
-    return list(dynamic_registry.agents.keys())
-
-def auto_register_mcp_sync(mcp_dir='mcpserver'):
-    """同步版本的自动注册（向后兼容）"""
-    import asyncio
-    return asyncio.run(auto_register_mcp(mcp_dir))
-
-# 获取Agent实例的统一接口
-def get_agent_instance(agent_name):
-    """获取Agent实例 - 只支持动态注册方式"""
-    if agent_name not in MCP_REGISTRY:
+        # 动态导入模块
+        module = importlib.import_module(module_name)
+        agent_class = getattr(module, class_name)
+        
+        # 创建实例
+        instance = agent_class()
+        return instance
+        
+    except Exception as e:
+        sys.stderr.write(f"创建agent实例失败 {manifest.get('name', 'unknown')}: {e}\n")
         return None
-    
-    agent_info = MCP_REGISTRY[agent_name]
-    
-    if agent_info['type'] == 'dynamic':
-        # 动态注册方式：直接从动态注册系统获取实例
-        return agent_info['instance']
-    
-    return None
 
-# 获取Agent元数据的统一接口
-def get_agent_metadata(agent_name):
-    """获取Agent元数据 - 只支持动态注册方式"""
-    if agent_name not in MCP_REGISTRY:
-        return None
+def scan_and_register_mcp_agents(mcp_dir: str = 'mcpserver') -> list:
+    """扫描目录中的JSON元数据文件，注册MCP类型的agent和Agent类型的agent"""
+    d = Path(mcp_dir)
+    registered_agents = []
     
-    agent_info = MCP_REGISTRY[agent_name]
-    
-    if agent_info['type'] == 'dynamic':
-        return agent_info.get('manifest')
-    
-    return None
-
-# 注册所有handoff服务 - 基于动态注册驱动，只为MCP服务注册
-def register_all_handoffs(mcp_manager):
-    """批量注册所有handoff服务 - 只为MCP服务注册，Agent服务不注册handoff"""
-    registered = []
-    
-    # 只为MCP服务注册handoff，不为Agent服务注册
-    for service_name, service_info in MCP_REGISTRY.items():
+    # 扫描所有agent-manifest.json文件
+    for manifest_file in d.glob('**/agent-manifest.json'):
         try:
-            # 检查是否是MCP服务（不是Agent服务）
-            if service_info.get('type') == 'dynamic':
-                # 检查是否已注册为Agent服务
-                if service_name in mcp_manager.agent_services:
-                    continue  # 跳过已注册为Agent的服务
+            # 加载manifest
+            manifest = load_manifest_file(manifest_file)
+            if not manifest:
+                continue
                 
-                # 只为MCP服务注册handoff
-                manifest = service_info.get('manifest', {})
-                schema = {
-                    "service_name": service_name,
-                    "tool_name": f"{service_name}_handoff",
-                    "tool_description": manifest.get('description', f'{service_name}服务'),
-                    "input_schema": manifest.get('inputSchema', {
-                        "type": "object",
-                        "properties": {
-                            "action": {"type": "string", "description": "操作类型"},
-                            "query": {"type": "string", "description": "查询内容"}
-                        },
-                        "required": ["action"]
-                    }),
-                    "agent_name": service_name,
-                    "strict_schema": False
-                }
-                
-                # 注册到MCP管理器
-                mcp_manager.register_handoff(
-                    service_name=schema["service_name"],
-                    tool_name=schema["tool_name"],
-                    tool_description=schema["tool_description"],
-                    input_schema=schema["input_schema"],
-                    agent_name=schema["agent_name"],
-                    strict_schema=schema.get("strict_schema", False)
-                )
-                registered.append(schema["service_name"])
-                
+            agent_type = manifest.get('agentType')
+            agent_name = manifest.get('name')
+            
+            if not agent_name:
+                sys.stderr.write(f"manifest缺少name字段: {manifest_file}\n")
+                continue
+            
+            # 根据agentType进行分类处理
+            if agent_type == 'mcp':
+                # MCP类型：注册到MCP_REGISTRY
+                MANIFEST_CACHE[agent_name] = manifest
+                agent_instance = create_agent_instance(manifest)
+                if agent_instance:
+                    MCP_REGISTRY[agent_name] = agent_instance
+                    registered_agents.append(agent_name)
+                    sys.stderr.write(f"✅ 已注册MCP Agent: {agent_name}\n")
+                    
+            elif agent_type == 'agent':
+                # Agent类型：转交给AgentManager处理
+                try:
+                    from mcpserver.agent_manager import get_agent_manager
+                    agent_manager = get_agent_manager()
+                    
+                    # 从manifest构建Agent配置
+                    agent_config = {
+                        'model_id': manifest.get('modelId', 'deepseek-chat'),
+                        'name': manifest.get('displayName', agent_name),
+                        'base_name': agent_name,
+                        'system_prompt': manifest.get('systemPrompt', f'You are a helpful AI assistant named {manifest.get("displayName", agent_name)}.'),
+                        'max_output_tokens': manifest.get('maxOutputTokens', 8192),
+                        'temperature': manifest.get('temperature', 0.7),
+                        'description': manifest.get('description', f'Assistant {manifest.get("displayName", agent_name)}.'),
+                        'model_provider': manifest.get('modelProvider', 'openai'),
+                        'api_base_url': manifest.get('apiBaseUrl', ''),
+                        'api_key': manifest.get('apiKey', '')
+                    }
+                    
+                    # 注册到AgentManager
+                    agent_manager._register_agent_from_manifest(agent_name, agent_config)
+                    registered_agents.append(f"agent:{agent_name}")
+                    sys.stderr.write(f"✅ 已注册Agent到AgentManager: {agent_name}\n")
+                    
+                except Exception as e:
+                    sys.stderr.write(f"注册Agent到AgentManager失败 {agent_name}: {e}\n")
+                    continue
+                    
         except Exception as e:
-            import sys
-            sys.stderr.write(f"❌ 注册MCP服务 {service_name} 失败: {e}\n")
+            sys.stderr.write(f"处理manifest文件失败 {manifest_file}: {e}\n")
+            continue
     
-    import sys
-    sys.stderr.write(f'✅ MCP服务handoff注册完成:\n')
-    sys.stderr.write(f'   - 注册服务: {registered}\n')
-    sys.stderr.write(f'   - 总计注册服务: {len(registered)}\n')
+    return registered_agents
 
-# 注意：自动注册已移至conversation_core.py中处理，避免重复注册
-# auto_register_mcp_sync()  # 已删除，避免重复注册
+def get_service_info(service_name: str) -> Optional[Dict[str, Any]]:
+    """获取指定服务的详细信息
+    
+    Args:
+        service_name: 服务名称
+        
+    Returns:
+        Optional[Dict[str, Any]]: 服务信息，包含manifest和实例信息
+    """
+    if service_name not in MCP_REGISTRY:
+        return None
+        
+    manifest = MANIFEST_CACHE.get(service_name, {})
+    instance = MCP_REGISTRY[service_name]
+    
+    return {
+        "name": service_name,
+        "manifest": manifest,
+        "instance": instance,
+        "description": manifest.get('description', ''),
+        "display_name": manifest.get('displayName', service_name),
+        "version": manifest.get('version', '1.0.0'),
+        "capabilities": manifest.get('capabilities', {}),
+        "input_schema": manifest.get('inputSchema', {}),
+        "available_tools": get_available_tools(service_name)
+    }
+
+def get_available_tools(service_name: str) -> List[Dict[str, Any]]:
+    """获取指定服务可用的工具列表
+    
+    Args:
+        service_name: 服务名称
+        
+    Returns:
+        List[Dict[str, Any]]: 工具列表
+    """
+    if service_name not in MANIFEST_CACHE:
+        return []
+        
+    manifest = MANIFEST_CACHE[service_name]
+    capabilities = manifest.get('capabilities', {})
+    invocation_commands = capabilities.get('invocationCommands', [])
+    
+    tools = []
+    for cmd in invocation_commands:
+        tools.append({
+            "name": cmd.get('command', ''),
+            "description": cmd.get('description', ''),
+            "example": cmd.get('example', ''),
+            "input_schema": manifest.get('inputSchema', {})
+        })
+    
+    return tools
+
+def get_all_services_info() -> Dict[str, Any]:
+    """获取所有已注册服务的详细信息
+    
+    Returns:
+        Dict[str, Any]: 所有服务信息
+    """
+    services_info = {}
+    for service_name in MCP_REGISTRY.keys():
+        service_info = get_service_info(service_name)
+        if service_info:
+            services_info[service_name] = service_info
+    
+    return services_info
+
+def query_services_by_capability(capability: str) -> List[str]:
+    """根据能力查询服务
+    
+    Args:
+        capability: 能力关键词
+        
+    Returns:
+        List[str]: 匹配的服务名称列表
+    """
+    matching_services = []
+    
+    for service_name, manifest in MANIFEST_CACHE.items():
+        description = manifest.get('description', '').lower()
+        display_name = manifest.get('displayName', '').lower()
+        
+        if capability.lower() in description or capability.lower() in display_name:
+            matching_services.append(service_name)
+    
+    return matching_services
+
+def get_service_statistics() -> Dict[str, Any]:
+    """获取服务统计信息
+    
+    Returns:
+        Dict[str, Any]: 统计信息
+    """
+    total_services = len(MCP_REGISTRY)
+    total_tools = sum(len(get_available_tools(name)) for name in MCP_REGISTRY.keys())
+    
+    return {
+        "total_services": total_services,
+        "total_tools": total_tools,
+        "registered_services": list(MCP_REGISTRY.keys()),
+        "last_update": "动态更新"
+    }
+
+# 自动扫描并注册
+def auto_register_mcp():
+    """自动注册所有MCP服务"""
+    registered = scan_and_register_mcp_agents()
+    sys.stderr.write(f"MCP注册完成，共注册 {len(registered)} 个服务: {registered}\n")
+    return registered
+
+# 执行自动注册
+auto_register_mcp()
+

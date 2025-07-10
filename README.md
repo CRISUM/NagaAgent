@@ -100,6 +100,12 @@ python check_env.py
 
 ## ⚙️ 配置说明
 
+### 重要配置变更说明
+**v3.0版本配置简化：**
+- 移除了`config.json`中的`mcp_services`和`agent_services`静态配置字段
+- 系统现在通过动态扫描`agent-manifest.json`文件自动发现和注册服务
+- 所有服务信息通过动态服务池实时查询，无需手动维护服务列表
+
 ### API 密钥配置
 直接修改 `config.py` 文件中的配置：
 ```python
@@ -151,6 +157,10 @@ GRAG_NEO4J_PASSWORD = "your_password"  # Neo4j密码
 - **所有Agent的注册元数据已集中在`mcpserver/mcp_registry.py`，主流程和管理器极简，扩展维护更方便。只需维护一处即可批量注册/扩展所有Agent服务。**
 - **自动注册/热插拔Agent机制，新增/删除Agent只需增删py文件，无需重启主程序**
 - **Agent Manifest标准化**，统一的`agent-manifest.json`格式，支持完整的字段验证和类型检查
+- **动态服务池查询**，系统通过扫描`agent-manifest.json`文件自动发现和注册服务，无需手动配置静态服务列表
+- **AgentManager独立系统**，支持Agent的配置加载、会话管理、消息组装和LLM调用，提供完整的Agent生命周期管理
+- **智能占位符替换**，支持Agent配置、环境变量、时间信息等多种占位符，实现动态提示词生成
+- **完整消息序列构建**，自动组装系统消息、历史消息和用户消息，确保对话上下文完整性
 - 聊天窗口支持**Markdown语法**，包括标题、粗体、斜体、代码块、表格、图片等。
 
 ---
@@ -266,7 +276,88 @@ await mcp.handoff(
 - **所有Agent的注册、schema、描述均集中在`mcpserver/mcp_registry.py`，批量管理，极简扩展**
 - 支持浏览器、文件、代码等多种Agent，全部可通过工具调用循环机制统一调用
 - Agent能力即插即用，自动注册/热插拔，无需重启主程序
-- 典型用法示例：
+- **动态服务池查询**：支持实时查询服务信息、按能力搜索、获取工具列表等
+
+### 动态服务池查询功能
+
+#### 核心查询方法
+```python
+from mcpserver.mcp_registry import (
+    get_all_services_info,      # 获取所有服务信息
+    get_service_info,           # 获取单个服务详情
+    query_services_by_capability, # 按能力搜索服务
+    get_service_statistics,     # 获取统计信息
+    get_available_tools         # 获取服务工具列表
+)
+
+# 获取所有服务信息
+services_info = get_all_services_info()
+
+# 按能力搜索服务
+file_services = query_services_by_capability("文件")
+
+# 获取服务统计
+stats = get_service_statistics()
+```
+
+#### MCPManager查询接口
+```python
+from mcpserver.mcp_manager import get_mcp_manager
+
+mcp_manager = get_mcp_manager()
+
+# 获取可用服务列表
+available_services = mcp_manager.get_available_services()
+
+# 获取过滤后的服务（MCP vs Agent）
+filtered_services = mcp_manager.get_available_services_filtered()
+
+# 查询服务详情
+service_detail = mcp_manager.query_service_by_name("FileAgent")
+
+# 按能力搜索
+matching_services = mcp_manager.query_services_by_capability("文件")
+
+# 获取服务工具
+tools = mcp_manager.get_service_tools("FileAgent")
+```
+
+#### API端点
+- `GET /mcp/services` - 获取所有服务列表和统计信息
+- `GET /mcp/services/{service_name}` - 获取指定服务详情
+- `GET /mcp/services/search/{capability}` - 按能力搜索服务
+- `GET /mcp/services/{service_name}/tools` - 获取服务工具列表
+- `GET /mcp/statistics` - 获取服务统计信息
+
+#### 查询结果示例
+```json
+{
+  "status": "success",
+  "services": [
+    {
+      "name": "FileAgent",
+      "description": "支持文件的读写、创建、删除、目录管理等操作。",
+      "display_name": "文件操作Agent",
+      "version": "1.0.0",
+      "available_tools": [
+        {
+          "name": "read",
+          "description": "读取指定文件内容",
+          "example": "{\"action\": \"read\", \"path\": \"test.txt\"}"
+        }
+      ]
+    }
+  ],
+  "statistics": {
+    "total_services": 5,
+    "total_tools": 17,
+    "registered_services": ["CoderAgent", "FileAgent", "AppLauncherAgent", "WeatherTimeAgent", "SystemControlAgent"],
+    "last_update": "动态更新"
+  }
+}
+```
+
+### 典型用法示例
 
 ```python
 # 读取文件内容
@@ -281,6 +372,170 @@ await s.mcp.handoff(
 )
 ```
 
+## 🤖 AgentManager 独立系统
+
+### 系统概述
+AgentManager是一个独立的Agent注册和调用系统，支持从配置文件动态加载Agent定义，提供统一的调用接口和完整的生命周期管理。
+
+### 核心功能
+
+#### 1. 配置管理
+- **动态配置加载**：从`agent_configs/`目录自动扫描和加载Agent配置文件
+- **配置验证**：自动验证Agent配置的完整性和有效性
+- **热重载**：支持运行时重新加载配置，无需重启系统
+
+#### 2. 会话管理
+- **多会话支持**：每个Agent支持多个独立的会话上下文
+- **历史记录**：自动维护对话历史，支持上下文召回
+- **会话过期**：自动清理过期的会话数据，节省内存
+
+#### 3. 消息组装
+- **系统消息**：自动构建Agent身份、行为、风格的系统提示词
+- **历史消息**：集成多轮对话历史，保持上下文连续性
+- **用户消息**：处理当前用户输入，支持占位符替换
+
+#### 4. 智能占位符替换
+支持多种类型的占位符替换：
+
+**Agent配置占位符**：
+- `{{AgentName}}` - Agent名称
+- `{{BaseName}}` - 基础名称
+- `{{Description}}` - 描述信息
+- `{{ModelId}}` - 模型ID
+- `{{Temperature}}` - 温度参数
+- `{{MaxTokens}}` - 最大输出token数
+
+**环境变量占位符**：
+- `{{ENV_VAR_NAME}}` - 系统环境变量
+
+**时间占位符**：
+- `{{CurrentTime}}` - 当前时间 (HH:MM:SS)
+- `{{CurrentDate}}` - 当前日期 (YYYY-MM-DD)
+- `{{CurrentDateTime}}` - 完整时间 (YYYY-MM-DD HH:MM:SS)
+
+### 配置文件格式
+
+#### Agent配置文件示例
+```json
+{
+  "ExampleAgent": {
+    "model_id": "deepseek-chat",
+    "name": "示例助手",
+    "base_name": "ExampleAgent",
+    "system_prompt": "你是{{AgentName}}，一个专业的{{Description}}。\n\n当前时间：{{CurrentDateTime}}\n模型：{{ModelId}}\n温度：{{Temperature}}\n\n请用中文回答，保持专业和友好的态度。",
+    "max_output_tokens": 8192,
+    "temperature": 0.7,
+    "description": "智能助手，擅长回答各种问题",
+    "model_provider": "openai",
+    "api_base_url": "https://api.deepseek.com/v1",
+    "api_key": "{{DEEPSEEK_API_KEY}}"
+  }
+}
+```
+
+#### 配置字段说明
+- `model_id`: LLM模型ID
+- `name`: Agent显示名称（中文）
+- `base_name`: Agent基础名称（英文）
+- `system_prompt`: 系统提示词，支持占位符
+- `max_output_tokens`: 最大输出token数
+- `temperature`: 温度参数（0.0-1.0）
+- `description`: Agent功能描述
+- `model_provider`: 模型提供商
+- `api_base_url`: API基础URL
+- `api_key`: API密钥（支持环境变量占位符）
+
+### 使用示例
+
+#### 基本调用
+```python
+from mcpserver.agent_manager import get_agent_manager
+
+# 获取AgentManager实例
+agent_manager = get_agent_manager()
+
+# 调用Agent
+result = await agent_manager.call_agent(
+    agent_name="ExampleAgent",
+    prompt="请帮我分析这份数据",
+    session_id="user_123"
+)
+
+if result["status"] == "success":
+    print(result["result"])
+else:
+    print(f"调用失败: {result['error']}")
+```
+
+#### 便捷函数调用
+```python
+from mcpserver.agent_manager import call_agent, list_agents
+
+# 便捷调用
+result = await call_agent("ExampleAgent", "你好")
+
+# 获取Agent列表
+agents = list_agents()
+for agent in agents:
+    print(f"{agent['name']}: {agent['description']}")
+```
+
+#### 会话管理
+```python
+# 获取会话历史
+history = agent_manager.get_agent_session_history("ExampleAgent", "user_123")
+
+# 更新会话历史
+agent_manager.update_agent_session_history(
+    "ExampleAgent", 
+    "用户消息", 
+    "助手回复", 
+    "user_123"
+)
+```
+
+### 系统集成
+
+#### 与MCP系统的集成
+AgentManager与MCP系统完全集成，支持统一的调用接口：
+
+```python
+# 通过MCP系统调用Agent
+result = await mcp_manager.unified_call(
+    service_name="ExampleAgent",
+    tool_name="call",
+    args={"prompt": "用户输入"}
+)
+```
+
+#### 工具调用格式
+```
+<<<[TOOL_REQUEST]>>>
+agentType: 「始」agent「末」
+agent_name: 「始」ExampleAgent「末」
+prompt: 「始」用户任务内容「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
+### 高级功能
+
+#### 1. 消息序列验证
+自动验证消息序列的格式和完整性：
+- 检查消息格式是否正确
+- 确保系统消息在开头
+- 验证角色和内容字段
+
+#### 2. 调试模式
+启用调试模式可查看详细的消息组装过程：
+```python
+agent_manager.debug_mode = True
+```
+
+#### 3. 定期清理
+系统自动定期清理过期的会话数据，默认每小时执行一次。
+
+---
+
 ## 📋 Agent Manifest标准化
 
 ### 标准化规范
@@ -292,7 +547,7 @@ await s.mcp.handoff(
 - `version`: 版本号（x.y.z格式）
 - `description`: 功能描述
 - `author`: 作者或模块名称
-- `agentType`: Agent类型（mcp/synchronous/asynchronous）
+- `agentType`: Agent类型（mcp/agent）
 - `entryPoint`: 入口点配置（module和class）
 
 #### 可选字段
@@ -540,6 +795,7 @@ GET /memory/stats
   - 支持多agent协作，ControllerAgent可智能分配任务给BrowserAgent、ContentAgent等
   - 注册中心`mcp_registry.py`自动发现并注册所有实现了`handle_handoff`的Agent实例，支持热插拔
   - 注册时自动输出所有已注册agent的名称和说明，便于调试
+  - 简化Agent类型：只支持`mcp`和`agent`两种类型
 
 - handoff机制全部通过`handle_handoff`异步方法调度，兼容TOOL_REQUEST和handoff两种格式
 

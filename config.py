@@ -118,19 +118,11 @@ class HandoffConfig(BaseModel):
 
 
 class MCPConfig(BaseModel):
-    """MCP服务配置"""
-    # MCP服务配置
-    mcp_services: List[str] = Field(
-        default=[],
-        description="可调用的MCP服务列表（不包含Agent服务）"
-    )
+    """MCP服务配置
     
-    # Agent服务配置
-    agent_services: List[str] = Field(
-        default=[],
-        description="可调用的Agent服务列表"
-    )
-    
+    注意：系统现在使用动态服务池查询，通过扫描agent-manifest.json文件自动发现和注册服务。
+    以下配置字段主要用于静态配置和向后兼容性。
+    """
     # 特殊工具名配置
     agent_tool_name: str = Field(
         default="agent",
@@ -143,15 +135,15 @@ class MCPConfig(BaseModel):
         description="当服务名冲突时，Agent服务优先"
     )
     
-    # 自动发现配置
+    # 自动发现配置（现在默认启用）
     auto_discover_agents: bool = Field(
         default=True,
-        description="自动发现和注册Agent服务"
+        description="自动发现和注册Agent服务（推荐启用）"
     )
     
     auto_discover_mcp: bool = Field(
         default=True,
-        description="自动发现和注册MCP服务"
+        description="自动发现和注册MCP服务（推荐启用）"
     )
     
     # 服务过滤配置
@@ -334,19 +326,43 @@ class SystemPrompts(BaseModel):
 2. 使用简单标点（逗号，句号，问号）传达语气
 3. 禁止使用括号()或其他符号表达状态、语气或动作
 
+不调用工具，直接回复message字段内容即可。
+
 【工具调用格式要求】
 如需调用某个工具，请严格使用如下格式输出（可多次出现）：
 
+**MCP服务调用格式：**
 <<<[TOOL_REQUEST]>>>
-tool_name: 「始」服务名称「末」
+agentType: 「始」mcp「末」
+service_name: 「始」MCP服务名称「末」
+tool_name: 「始」使用工具「末」
 param1: 「始」参数值1「末」
 param2: 「始」参数值2「末」
 <<<[END_TOOL_REQUEST]>>>
 
-如无需调用工具，直接回复message字段内容即可。
+**Agent服务调用格式：**
+<<<[TOOL_REQUEST]>>>
+agentType: 「始」agent「末」
+agent_name: 「始」Agent名称「末」
+prompt: 「始」任务内容「末」
+<<<[END_TOOL_REQUEST]>>>
 
-- 可用的MCP服务有：{available_mcp_services}
-- 可用的Agent服务有：{available_agent_services}
+服务类型说明：
+- agentType: "mcp" - MCP服务，使用工具调用格式
+- agentType: "agent" - Agent服务，使用Agent调用格式
+
+【可用服务信息】
+MCP服务：
+{available_mcp_services}
+Agent服务：
+{available_agent_services}
+
+调用说明：
+- MCP服务：使用service_name和tool_name，支持多个参数
+- Agent服务：使用agent_name和prompt，prompt为本次任务内容
+- 服务名称：使用英文服务名（如AppLauncherAgent）作为service_name或agent_name
+
+
 """,
         description="娜迦系统提示词"
     )
