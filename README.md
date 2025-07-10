@@ -161,6 +161,9 @@ GRAG_NEO4J_PASSWORD = "your_password"  # Neo4j密码
 - **AgentManager独立系统**，支持Agent的配置加载、会话管理、消息组装和LLM调用，提供完整的Agent生命周期管理
 - **智能占位符替换**，支持Agent配置、环境变量、时间信息等多种占位符，实现动态提示词生成
 - **完整消息序列构建**，自动组装系统消息、历史消息和用户消息，确保对话上下文完整性
+- **多模型提供商支持**，支持OpenAI、DeepSeek、Anthropic等多种LLM提供商，每个Agent可独立配置
+- **会话隔离与TTL管理**，支持多用户多会话隔离，自动清理过期会话数据
+- **统一工具调用接口**，MCP和Agent类型服务通过统一的TOOL_REQUEST格式调用，支持混合调用场景
 - 聊天窗口支持**Markdown语法**，包括标题、粗体、斜体、代码块、表格、图片等。
 
 ---
@@ -185,11 +188,15 @@ NagaAgent/
 ├── mcpserver/
 │   ├── mcp_manager.py          # MCP服务管理
 │   ├── mcp_registry.py         # Agent注册与schema元数据
+│   ├── agent_manager.py        # Agent管理器（独立系统）
 │   ├── dynamic_agent_registry.py # 动态Agent注册系统
 │   ├── AGENT_MANIFEST_TEMPLATE.json # Agent manifest模板
 │   ├── MANIFEST_STANDARDIZATION.md # Manifest标准化规范
 │   ├── agent_xxx/              # 各类自定义Agent（如file、coder、browser等）
 │   │   └── agent-manifest.json # Agent配置文件
+├── agent_configs/              # Agent配置文件目录
+│   ├── agents.json             # Agent配置主文件
+│   └── *.json                  # 其他Agent配置文件
 ├── pyproject.toml              # 项目配置和依赖
 ├── setup.ps1                   # Windows配置脚本
 ├── start.bat                   # Windows启动脚本
@@ -223,23 +230,43 @@ NagaAgent/
 
 ## 🔧 工具调用循环机制
 
-### TOOL_REQUEST格式
-系统仅支持如下格式的工具调用：
+### 系统概述
+NagaAgent支持两种类型的工具调用：
+- **MCP服务调用**：通过`agentType: mcp`调用MCP类型的Agent
+- **Agent服务调用**：通过`agentType: agent`调用Agent类型的Agent
 
+### TOOL_REQUEST格式
+系统支持两种格式的工具调用：
+
+#### MCP服务调用格式
 ```
 <<<[TOOL_REQUEST]>>>
-tool_name: 「始」服务名称「末」
+agentType: 「始」mcp「末」
+service_name: 「始」服务名称「末」
+tool_name: 「始」工具名称「末」
 param1: 「始」参数值1「末」
 param2: 「始」参数值2「末」
 <<<[END_TOOL_REQUEST]>>>
 ```
 
+#### Agent服务调用格式
+```
+<<<[TOOL_REQUEST]>>>
+agentType: 「始」agent「末」
+agent_name: 「始」Agent名称「末」
+prompt: 「始」用户任务内容「末」
+<<<[END_TOOL_REQUEST]>>>
+```
+
 ### 工具调用流程
 1. **LLM输出TOOL_REQUEST格式**：LLM根据用户需求输出工具调用请求
-2. **自动解析工具调用**：系统自动解析TOOL_REQUEST块，提取工具名称和参数
-3. **执行工具调用**：调用对应的MCP服务执行具体任务
-4. **结果返回LLM**：将工具执行结果返回给LLM
-5. **循环处理**：重复步骤2-4，直到LLM输出普通文本或无工具调用
+2. **自动解析agentType**：系统首先解析agentType字段，确定调用类型
+3. **路由到对应管理器**：
+   - `mcp`类型 → 路由到MCPManager处理
+   - `agent`类型 → 路由到AgentManager处理
+4. **执行工具调用**：调用对应的服务执行具体任务
+5. **结果返回LLM**：将工具执行结果返回给LLM
+6. **循环处理**：重复步骤2-5，直到LLM输出普通文本或无工具调用
 
 ### 配置参数
 ```python
@@ -250,6 +277,8 @@ SHOW_handoff_OUTPUT = False      # 是否显示工具调用输出
 ```
 
 ### 使用示例
+
+#### MCP服务调用示例
 ```python
 # 浏览器操作
 await mcp.handoff(
@@ -268,6 +297,37 @@ await mcp.handoff(
     service_name="coder",
     task={"action": "run", "file": "main.py"}
 )
+```
+
+#### Agent服务调用示例
+```python
+# 调用对话Agent
+result = await agent_manager.call_agent(
+    agent_name="ExampleAgent",
+    prompt="请帮我分析这份数据",
+    session_id="user_123"
+)
+
+# 通过工具调用循环调用Agent
+# LLM会输出：
+# <<<[TOOL_REQUEST]>>>
+# agentType: 「始」agent「末」
+# agent_name: 「始」ExampleAgent「末」
+# prompt: 「始」请帮我分析这份数据「末」
+# <<<[END_TOOL_REQUEST]>>>
+```
+
+#### 混合调用示例
+```python
+# 一个完整的工具调用循环可能包含：
+# 1. 调用文件Agent读取数据
+# 2. 调用分析Agent处理数据
+# 3. 调用浏览器Agent展示结果
+
+# LLM会自动选择合适的Agent类型：
+# - 文件操作 → MCP类型
+# - 数据分析 → Agent类型
+# - 浏览器操作 → MCP类型
 ```
 
 ---
@@ -375,7 +435,9 @@ await s.mcp.handoff(
 ## 🤖 AgentManager 独立系统
 
 ### 系统概述
-AgentManager是一个独立的Agent注册和调用系统，支持从配置文件动态加载Agent定义，提供统一的调用接口和完整的生命周期管理。
+AgentManager是一个独立的Agent注册和调用系统，支持从配置文件动态加载Agent定义，提供统一的调用接口和完整的生命周期管理。系统支持两种类型的Agent：
+- **MCP类型Agent**：通过`agent-manifest.json`注册，支持工具调用和复杂任务处理
+- **Agent类型Agent**：通过配置文件注册，专注于对话和LLM调用
 
 ### 核心功能
 
@@ -383,35 +445,46 @@ AgentManager是一个独立的Agent注册和调用系统，支持从配置文件
 - **动态配置加载**：从`agent_configs/`目录自动扫描和加载Agent配置文件
 - **配置验证**：自动验证Agent配置的完整性和有效性
 - **热重载**：支持运行时重新加载配置，无需重启系统
+- **环境变量支持**：支持从环境变量和`.env`文件加载敏感配置
 
 #### 2. 会话管理
 - **多会话支持**：每个Agent支持多个独立的会话上下文
 - **历史记录**：自动维护对话历史，支持上下文召回
 - **会话过期**：自动清理过期的会话数据，节省内存
+- **会话隔离**：不同用户和不同Agent的会话完全隔离
 
 #### 3. 消息组装
 - **系统消息**：自动构建Agent身份、行为、风格的系统提示词
 - **历史消息**：集成多轮对话历史，保持上下文连续性
 - **用户消息**：处理当前用户输入，支持占位符替换
+- **消息验证**：自动验证消息序列的格式和完整性
 
 #### 4. 智能占位符替换
 支持多种类型的占位符替换：
 
 **Agent配置占位符**：
 - `{{AgentName}}` - Agent名称
+- `{{MaidName}}` - Agent名称（兼容旧格式）
 - `{{BaseName}}` - 基础名称
 - `{{Description}}` - 描述信息
 - `{{ModelId}}` - 模型ID
 - `{{Temperature}}` - 温度参数
 - `{{MaxTokens}}` - 最大输出token数
+- `{{ModelProvider}}` - 模型提供商
 
 **环境变量占位符**：
-- `{{ENV_VAR_NAME}}` - 系统环境变量
+- `{{ENV_VAR_NAME}}` - 系统环境变量（支持任意大写字母和下划线的环境变量）
 
 **时间占位符**：
 - `{{CurrentTime}}` - 当前时间 (HH:MM:SS)
 - `{{CurrentDate}}` - 当前日期 (YYYY-MM-DD)
 - `{{CurrentDateTime}}` - 完整时间 (YYYY-MM-DD HH:MM:SS)
+
+#### 5. LLM集成
+- **多模型支持**：支持OpenAI、DeepSeek等多种LLM提供商
+- **配置隔离**：每个Agent使用独立的模型配置（API密钥、基础URL等）
+- **错误处理**：完善的API调用错误处理和重试机制
+- **调试模式**：支持详细的调试日志输出
 
 ### 配置文件格式
 
@@ -434,16 +507,24 @@ AgentManager是一个独立的Agent注册和调用系统，支持从配置文件
 ```
 
 #### 配置字段说明
-- `model_id`: LLM模型ID
-- `name`: Agent显示名称（中文）
+- `model_id`: LLM模型ID（必需）
+- `name`: Agent显示名称（中文，必需）
 - `base_name`: Agent基础名称（英文）
 - `system_prompt`: 系统提示词，支持占位符
-- `max_output_tokens`: 最大输出token数
-- `temperature`: 温度参数（0.0-1.0）
+- `max_output_tokens`: 最大输出token数（默认8192）
+- `temperature`: 温度参数（0.0-1.0，默认0.7）
 - `description`: Agent功能描述
-- `model_provider`: 模型提供商
-- `api_base_url`: API基础URL
+- `model_provider`: 模型提供商（默认openai）
+- `api_base_url`: API基础URL（可选，默认使用提供商标准URL）
 - `api_key`: API密钥（支持环境变量占位符）
+
+#### 环境变量配置示例
+```bash
+# .env文件示例
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
+OPENAI_API_KEY=your_openai_api_key_here
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+```
 
 ### 使用示例
 
@@ -469,7 +550,7 @@ else:
 
 #### 便捷函数调用
 ```python
-from mcpserver.agent_manager import call_agent, list_agents
+from mcpserver.agent_manager import call_agent, list_agents, get_agent_info
 
 # 便捷调用
 result = await call_agent("ExampleAgent", "你好")
@@ -478,6 +559,12 @@ result = await call_agent("ExampleAgent", "你好")
 agents = list_agents()
 for agent in agents:
     print(f"{agent['name']}: {agent['description']}")
+
+# 获取Agent详细信息
+agent_info = get_agent_info("ExampleAgent")
+if agent_info:
+    print(f"模型: {agent_info['model_id']}")
+    print(f"温度: {agent_info['temperature']}")
 ```
 
 #### 会话管理
@@ -492,6 +579,21 @@ agent_manager.update_agent_session_history(
     "助手回复", 
     "user_123"
 )
+
+# 检查会话是否过期
+is_expired = agent_manager._is_context_expired(timestamp)
+```
+
+#### 配置管理
+```python
+# 重新加载配置
+agent_manager.reload_configs()
+
+# 启用调试模式
+agent_manager.debug_mode = True
+
+# 获取可用Agent列表
+available_agents = agent_manager.get_available_agents()
 ```
 
 ### 系统集成
@@ -517,6 +619,19 @@ prompt: 「始」用户任务内容「末」
 <<<[END_TOOL_REQUEST]>>>
 ```
 
+#### 动作调用格式
+```python
+# 通过动作调用Agent
+result = await agent_manager.call_agent_by_action(
+    agent_name="ExampleAgent",
+    action_args={
+        "action": "analyze_data",
+        "data_type": "csv",
+        "file_path": "data.csv"
+    }
+)
+```
+
 ### 高级功能
 
 #### 1. 消息序列验证
@@ -524,6 +639,7 @@ prompt: 「始」用户任务内容「末」
 - 检查消息格式是否正确
 - 确保系统消息在开头
 - 验证角色和内容字段
+- 支持消息序列的完整性检查
 
 #### 2. 调试模式
 启用调试模式可查看详细的消息组装过程：
@@ -533,6 +649,39 @@ agent_manager.debug_mode = True
 
 #### 3. 定期清理
 系统自动定期清理过期的会话数据，默认每小时执行一次。
+
+#### 4. 错误处理
+- **配置错误**：自动检测和报告配置问题
+- **API错误**：完善的LLM API调用错误处理
+- **会话错误**：会话数据损坏时的自动恢复
+- **网络错误**：网络连接问题的重试机制
+
+#### 5. 性能优化
+- **内存管理**：自动清理过期会话，防止内存泄漏
+- **缓存机制**：Agent配置缓存，提高响应速度
+- **并发支持**：支持多个Agent的并发调用
+- **资源限制**：可配置的最大历史消息数量限制
+
+### 系统架构
+
+#### 组件关系
+```
+AgentManager
+├── 配置管理 (AgentConfig)
+├── 会话管理 (AgentSession)
+├── 消息组装 (MessageBuilder)
+├── 占位符替换 (PlaceholderReplacer)
+├── LLM集成 (LLMClient)
+└── 错误处理 (ErrorHandler)
+```
+
+#### 数据流
+1. **配置加载** → 从文件加载Agent配置
+2. **会话初始化** → 创建或恢复会话上下文
+3. **消息组装** → 构建完整的消息序列
+4. **占位符替换** → 处理动态内容替换
+5. **LLM调用** → 调用对应的LLM API
+6. **结果处理** → 更新会话历史并返回结果
 
 ---
 
@@ -570,10 +719,62 @@ python test_manifest_standardization.py
 - 动态注册系统：`mcpserver/dynamic_agent_registry.py`
 
 ### 创建新Agent
-1. 复制模板文件到Agent目录
-2. 修改字段内容
-3. 运行验证脚本检查格式
-4. 重启系统自动注册
+
+#### 创建MCP类型Agent
+1. 在`mcpserver/`目录下创建新的Agent目录
+2. 复制`AGENT_MANIFEST_TEMPLATE.json`到Agent目录
+3. 修改manifest文件内容
+4. 创建Agent实现类
+5. 重启系统自动注册
+
+#### 创建Agent类型Agent
+1. 在`agent_configs/`目录下创建配置文件
+2. 定义Agent配置（模型、提示词等）
+3. 配置环境变量（API密钥等）
+4. 重启系统自动加载
+
+### AgentManager配置
+
+#### 基础配置
+```python
+# config.py中的AgentManager配置
+AGENT_MANAGER_CONFIG = {
+    "config_dir": "agent_configs",  # 配置文件目录
+    "max_history_rounds": 7,        # 最大历史轮数
+    "context_ttl_hours": 24,        # 上下文TTL（小时）
+    "debug_mode": True,             # 调试模式
+    "cleanup_interval": 3600        # 清理间隔（秒）
+}
+```
+
+#### 会话配置
+```python
+# 会话管理配置
+SESSION_CONFIG = {
+    "max_messages": 14,             # 最大消息数量（max_history_rounds * 2）
+    "session_timeout": 86400,       # 会话超时时间（秒）
+    "auto_cleanup": True            # 自动清理过期会话
+}
+```
+
+#### 模型配置
+```python
+# 支持的模型提供商配置
+MODEL_PROVIDERS = {
+    "openai": {
+        "base_url": "https://api.openai.com/v1",
+        "default_model": "gpt-3.5-turbo"
+    },
+    "deepseek": {
+        "base_url": "https://api.deepseek.com/v1",
+        "default_model": "deepseek-chat"
+    },
+    "anthropic": {
+        "base_url": "https://api.anthropic.com",
+        "default_model": "claude-3-sonnet-20240229"
+    }
+}
+```
 
 ---
 
@@ -657,6 +858,33 @@ python test_manifest_standardization.py
 - 浏览器无法启动，检查playwright安装与网络
 - 主题树/索引/参数/密钥全部在`config.py`统一管理
 - 聊天输入`#devmode`进入开发者模式，后续对话不写入GRAG记忆，仅用于工具调用测试
+
+### AgentManager问题
+- **Agent配置加载失败**：检查`agent_configs/`目录下的JSON文件格式是否正确
+- **API调用失败**：确认API密钥配置正确，检查网络连接
+- **会话历史丢失**：检查会话TTL配置，确认会话未过期
+- **占位符替换失败**：确认环境变量已正确设置
+- **内存占用过高**：调整`max_history_rounds`参数，减少历史消息数量
+
+### 最佳实践
+
+#### Agent配置最佳实践
+1. **使用环境变量**：敏感信息如API密钥应使用环境变量
+2. **合理设置参数**：根据任务需求调整temperature和max_output_tokens
+3. **优化提示词**：使用占位符实现动态内容，提高灵活性
+4. **会话管理**：合理设置会话TTL，避免内存泄漏
+
+#### 性能优化建议
+1. **缓存配置**：启用配置缓存，减少文件读取开销
+2. **并发控制**：合理控制并发Agent调用数量
+3. **资源清理**：定期清理过期会话和临时数据
+4. **监控日志**：启用调试模式监控系统性能
+
+#### 安全建议
+1. **API密钥管理**：使用环境变量或密钥管理服务
+2. **输入验证**：对用户输入进行验证和清理
+3. **错误处理**：避免在错误信息中泄露敏感信息
+4. **访问控制**：实现适当的访问控制机制
 
 ---
 
