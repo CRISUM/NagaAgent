@@ -598,6 +598,9 @@ SHOW_handoff_OUTPUT = config.handoff.show_output
 BROWSER_PATH = config.browser.path
 PLAYWRIGHT_HEADLESS = config.browser.playwright_headless
 
+# TTS 配置兼容性映射 - 直接暴露 tts 对象给旧代码使用
+tts = config.tts
+
 TTS_API_KEY = config.tts.api_key
 TTS_PORT = config.tts.port
 TTS_DEFAULT_VOICE = config.tts.default_voice

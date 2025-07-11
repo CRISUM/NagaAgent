@@ -51,7 +51,7 @@ logging.getLogger("openai._base_client").setLevel(logging.WARNING)
 # 隐藏asyncio的DEBUG日志
 logging.getLogger("asyncio").setLevel(logging.WARNING)
 logger = logging.getLogger("NagaConversation")
-
+import pdb
 # _MCP_HANDOFF_REGISTERED=False  # 已移除，不再需要
 _TREE_THINKING_SUBSYSTEMS_INITIALIZED=False
 _MCP_SERVICES_INITIALIZED=False

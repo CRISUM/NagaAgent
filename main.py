@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import QApplication
 from config import config
 from summer_memory.memory_manager import memory_manager
 from ui.pyqt_chat_window import ChatWindow
-
+import pdb
 n=NagaConversation()
 def show_help():print('系统命令: 清屏, 查看索引, 帮助, 退出')
 def show_index():print('主题分片索引已集成，无需单独索引查看')
@@ -73,6 +73,8 @@ def start_api_server():
     except Exception as e:
         print(f"❌ API服务器启动异常: {e}")
 
+
+
 with open('./ui/progress.txt','w')as f:
     f.write('0')
 mm = memory_manager
@@ -110,7 +112,11 @@ def start_tts_server():
                 start_http_server()
             except Exception as e:
                 print(f"❌ TTS服务启动失败: {e}")
-        
+
+            # from voice.start_voice_service import start_http_server
+            # start_http_server()
+
+            #print(f"❌ TTS服务启动失败: {e}")            
         tts_thread = threading.Thread(target=run_tts, daemon=True)
         tts_thread.start()
         print("✅ TTS服务已在后台启动")
@@ -119,6 +125,7 @@ def start_tts_server():
         print(f"❌ TTS服务启动异常: {e}")
 
 # 自动启动TTS服务
+
 start_tts_server()
 
 show_help()

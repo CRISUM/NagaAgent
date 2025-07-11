@@ -51,8 +51,8 @@ class VoiceIntegration:
             
         if final_text and final_text.strip():
             logger.info(f"接收最终文本: {final_text[:100]}...")
-            # 在后台线程播放最终文本
-            self._play_text_in_background(final_text)
+            # 直接播放最终文本
+            asyncio.create_task(self._play_text(final_text))
     
     def _check_and_play_sentences(self):
         """检查并播放完整句子"""
@@ -74,8 +74,8 @@ class VoiceIntegration:
             complete_sentence = combined_text[:sentence_end_pos + 1]
             remaining_text = combined_text[sentence_end_pos + 1:].strip()
             
-            # 在后台线程播放完整句子
-            self._play_text_in_background(complete_sentence)
+            # 播放完整句子
+            asyncio.create_task(self._play_text(complete_sentence))
             
             # 更新缓冲区
             if remaining_text:
@@ -87,7 +87,7 @@ class VoiceIntegration:
         if len(self.text_buffer) > self.max_buffer_size:
             # 强制播放缓冲区内容
             forced_text = ' '.join(self.text_buffer)
-            self._play_text_in_background(forced_text)
+            asyncio.create_task(self._play_text(forced_text))
             self.text_buffer = []
     
     async def _play_text(self, text: str):
@@ -156,83 +156,22 @@ class VoiceIntegration:
         """播放音频文件"""
         try:
             import platform
-            import subprocess
-            import asyncio
-            
             system = platform.system()
             
             if system == "Windows":
-                # Windows使用winsound或windows media player
-                try:
-                    import winsound
-                    winsound.PlaySound(file_path, winsound.SND_FILENAME)
-                except ImportError:
-                    subprocess.run(["start", "", file_path], shell=True, check=False)
+                import subprocess
+                subprocess.Popen(["start", file_path], shell=True)
             elif system == "Darwin":  # macOS
-                subprocess.run(["afplay", file_path], check=False)
+                import subprocess
+                subprocess.Popen(["open", file_path])
             elif system == "Linux":
-                # Linux尝试多种播放器
-                players = ["aplay", "paplay", "mpg123", "mpv", "vlc", "xdg-open"]
-                for player in players:
-                    try:
-                        result = subprocess.run([player, file_path], 
-                                               check=False, 
-                                               capture_output=True, 
-                                               timeout=10)
-                        if result.returncode == 0:
-                            break
-                    except (subprocess.TimeoutExpired, FileNotFoundError):
-                        continue
-                else:
-                    logger.warning("找不到可用的音频播放器")
+                import subprocess
+                subprocess.Popen(["xdg-open", file_path])
             else:
                 logger.warning(f"不支持的操作系统: {system}")
                 
         except Exception as e:
             logger.error(f"系统播放器调用失败: {e}")
-            # 尝试使用 pygame 作为备选方案
-            try:
-                await self._play_with_pygame(file_path)
-            except Exception as pygame_error:
-                logger.error(f"pygame播放也失败: {pygame_error}")
-    
-    async def _play_with_pygame(self, file_path: str):
-        """使用pygame播放音频（备选方案）"""
-        try:
-            import pygame
-            pygame.mixer.init()
-            pygame.mixer.music.load(file_path)
-            pygame.mixer.music.play()
-            
-            # 等待播放完成
-            while pygame.mixer.music.get_busy():
-                await asyncio.sleep(0.1)
-                
-        except ImportError:
-            logger.warning("pygame未安装，无法作为备选播放器")
-        except Exception as e:
-            logger.error(f"pygame播放失败: {e}")
-    
-    def _play_text_in_background(self, text: str):
-        """在后台线程中播放文本音频"""
-        import threading
-        
-        def run_in_thread():
-            """在线程中运行异步函数"""
-            try:
-                # 创建新的事件循环
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(self._play_text(text))
-                finally:
-                    loop.close()
-            except Exception as e:
-                logger.error(f"后台播放音频失败: {e}")
-        
-        # 在后台线程中运行
-        thread = threading.Thread(target=run_in_thread, daemon=True)
-        thread.start()
 
 # 全局实例
 _voice_integration_instance: Optional[VoiceIntegration] = None

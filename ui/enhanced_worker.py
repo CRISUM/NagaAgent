@@ -8,6 +8,8 @@ import time
 from PyQt5.QtCore import QThread, pyqtSignal
 from ui.response_utils import extract_message
 
+import pdb
+
 class EnhancedWorker(QThread):
     """增强版工作线程"""
     
@@ -174,7 +176,7 @@ class StreamingWorker(EnhancedWorker):
                         
                         # 发送流式数据到前端
                         self.stream_chunk.emit(content_str)
-                        
+                        pdb.set_trace()  # 调试点
                         # 发送文本到语音集成模块
                         try:
                             from voice.voice_integration import get_voice_integration

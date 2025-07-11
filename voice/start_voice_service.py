@@ -10,10 +10,9 @@ import argparse
 import threading
 import time
 from pathlib import Path
-
 # 添加项目根目录到路径
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-
+# from handle_text import prepare_tts_input_with_context
 from config import config
 
 def start_http_server():
@@ -28,9 +27,22 @@ def start_http_server():
         
         http_server = WSGIServer(('0.0.0.0', config.tts.port), app)
         http_server.serve_forever()
+
     except Exception as e:
         print(f"❌ HTTP服务器启动失败: {e}")
         return False
+
+
+    # from voice.server import app
+    # from gevent.pywsgi import WSGIServer
+    
+    # print(f"🚀 启动HTTP TTS服务器...")
+    # print(f"📍 地址: http://127.0.0.1:{config.tts.port}")
+    # print(f"🔑 API密钥: {'已启用' if config.tts.require_api_key else '已禁用'}")
+    
+    # http_server = WSGIServer(('0.0.0.0', config.tts.port), app)
+    # http_server.serve_forever()
+
 
 def start_websocket_server():
     """启动WebSocket TTS服务器"""
@@ -109,6 +121,7 @@ def main():
     print(f"   默认格式: {config.tts.default_format}")
     print(f"   默认语速: {config.tts.default_speed}")
     print(f"   需要API密钥: {config.tts.require_api_key}")
+    print(f"   mode: {args.mode}")
     print("=" * 50)
     
     if args.mode == "http":
