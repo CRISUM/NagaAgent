@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/xxiii8322766509-nagaagent-badge.png)](https://mseep.ai/app/xxiii8322766509-nagaagent)
+
 # NagaAgent 3.0
 
 > 智能对话助手，支持多MCP服务、流式语音交互、GRAG知识图谱记忆系统、RESTful API接口、极致精简代码风格。
