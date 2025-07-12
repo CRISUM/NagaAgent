@@ -14,7 +14,6 @@ from PyQt5.QtWidgets import QApplication
 from config import config
 from summer_memory.memory_manager import memory_manager
 from ui.pyqt_chat_window import ChatWindow
-import pdb
 n=NagaConversation()
 def show_help():print('系统命令: 清屏, 查看索引, 帮助, 退出')
 def show_index():print('主题分片索引已集成，无需单独索引查看')
