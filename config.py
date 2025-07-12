@@ -203,13 +203,23 @@ class TTSConfig(BaseModel):
     """TTS服务配置"""
     api_key: str = Field(default="your_api_key_here", description="TTS服务API密钥")
     port: int = Field(default=5050, ge=1, le=65535, description="TTS服务端口")
-    default_voice: str = Field(default="en-US-AvaNeural", description="默认语音")
+    default_voice: str = Field(default="zh-CN-XiaoxiaoNeural", description="默认语音")
     default_format: str = Field(default="mp3", description="默认音频格式")
     default_speed: float = Field(default=1.0, ge=0.1, le=3.0, description="默认语速")
-    default_language: str = Field(default="en-US", description="默认语言")
+    default_language: str = Field(default="zh-CN", description="默认语言")
     remove_filter: bool = Field(default=False, description="是否移除过滤")
     expand_api: bool = Field(default=True, description="是否扩展API")
     require_api_key: bool = Field(default=True, description="是否需要API密钥")
+    
+    # TTS提供商配置
+    provider: str = Field(default="edge-tts", description="TTS提供商: edge-tts 或 minimax")
+    
+    # Minimax配置
+    minimax_api_key: str = Field(default="", description="Minimax API密钥")
+    group_id: str = Field(default="", description="Minimax Group ID")
+    tts_model: str = Field(default="speech-02-hd", description="Minimax模型")
+    default_voice: str = Field(default="male-qn-qingse", description="Minimax语音ID")
+    minimax_emotion: str = Field(default="happy", description="Minimax情感")
 
 
 class QuickModelConfig(BaseModel):
