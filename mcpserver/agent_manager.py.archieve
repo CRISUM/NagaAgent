@@ -74,54 +74,8 @@ class AgentManager:
         
         logger.info(f"AgentManager初始化完成，已加载 {len(self.agents)} 个Agent")
     
-    def _load_global_config(self):
-        """加载全局配置文件"""
-        try:
-            config_file = Path("config.json")
-            if config_file.exists():
-                with open(config_file, 'r', encoding='utf-8') as f:
-                    global_config = json.load(f)
-                return global_config.get('api', {})
-        except Exception as e:
-            logger.warning(f"加载全局配置失败: {e}")
-        return {}
-
-    def _replace_environment_placeholders(self, text: str, global_api_config: dict) -> str:
-        """替换配置中的环境变量占位符，如果环境变量为空则回退到全局配置"""
-        if not text:
-            return ""
-        
-        processed_text = str(text)
-        
-        # 处理常见的占位符，优先使用环境变量，如果为空则使用全局配置
-        placeholder_mapping = {
-            "{{API_KEY}}": os.getenv('API_KEY') or global_api_config.get('api_key', ''),
-            "{{API_BASE_URL}}": os.getenv('API_BASE_URL') or global_api_config.get('base_url', ''),
-            "{{DEEPSEEK_API_KEY}}": os.getenv('DEEPSEEK_API_KEY') or global_api_config.get('api_key', ''),
-            "{{MODEL_PROVIDER}}": os.getenv('MODEL_PROVIDER') or "openai"
-        }
-        
-        for placeholder, value in placeholder_mapping.items():
-            if placeholder in processed_text:
-                processed_text = processed_text.replace(placeholder, value)
-        
-        # 处理其他环境变量格式的占位符
-        import re
-        env_pattern = r'\{\{([A-Z_][A-Z0-9_]*)\}\}'
-        for match in re.finditer(env_pattern, processed_text):
-            env_var_name = match.group(1)
-            env_value = os.getenv(env_var_name, '')
-            if env_value:  # 如果环境变量有值，使用环境变量
-                processed_text = processed_text.replace(f"{{{{{env_var_name}}}}}", env_value)
-            # 如果环境变量为空，保持占位符不变（可能会在后续处理中替换）
-        
-        return processed_text
-
     def _load_agent_configs(self):
         """从配置文件加载Agent定义"""
-        # 加载全局配置
-        global_api_config = self._load_global_config()
-        
         # 扫描配置文件目录
         config_files = list(self.config_dir.glob("*.json"))
         
@@ -133,23 +87,6 @@ class AgentManager:
                 # 解析Agent配置
                 for agent_key, agent_data in config_data.items():
                     if self._validate_agent_config(agent_data):
-                        # 处理占位符，如果替换后为空则使用全局配置
-                        api_base_url = self._replace_environment_placeholders(
-                            agent_data.get('api_base_url', ''), global_api_config
-                        )
-                        api_key = self._replace_environment_placeholders(
-                            agent_data.get('api_key', ''), global_api_config
-                        )
-                        model_provider = self._replace_environment_placeholders(
-                            agent_data.get('model_provider', 'openai'), global_api_config
-                        )
-                        
-                        # 如果处理后仍为空，使用全局配置的默认值
-                        if not api_base_url:
-                            api_base_url = global_api_config.get('base_url', 'https://api.deepseek.com/v1')
-                        if not api_key:
-                            api_key = global_api_config.get('api_key', '')
-                        
                         agent_config = AgentConfig(
                             id=agent_data.get('model_id', ''),
                             name=agent_data.get('name', agent_key),
@@ -158,13 +95,13 @@ class AgentManager:
                             max_output_tokens=agent_data.get('max_output_tokens', 40000),
                             temperature=agent_data.get('temperature', 0.7),
                             description=agent_data.get('description', f'Assistant {agent_data.get("name", agent_key)}.'),
-                            model_provider=model_provider,
-                            api_base_url=api_base_url,
-                            api_key=api_key
+                            model_provider=agent_data.get('model_provider', 'openai'),
+                            api_base_url=agent_data.get('api_base_url', ''),
+                            api_key=agent_data.get('api_key', '')
                         )
                         
                         self.agents[agent_key] = agent_config
-                        logger.info(f"已加载Agent: {agent_key} ({agent_config.name}) - API: {api_base_url}")
+                        logger.info(f"已加载Agent: {agent_key} ({agent_config.name})")
                 
             except Exception as e:
                 logger.error(f"加载配置文件 {config_file} 失败: {e}")

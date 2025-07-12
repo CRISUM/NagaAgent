@@ -31,5 +31,9 @@
     "require_api_key": false,
     "remove_filter": false,
     "expand_api": true
+  },
+  "grag":{
+    "neo4j_uri": "neo4j+s://7a74ff65.databases.neo4j.io",
+    "neo4j_password": "DEj1eCIxN0lhweTxVs-vhdTNDIk4SLG8Up1mpsZDrD8"
   }
 }

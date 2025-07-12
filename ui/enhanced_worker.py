@@ -176,8 +176,8 @@ class StreamingWorker(EnhancedWorker):
                         
                         # 发送流式数据到前端
                         self.stream_chunk.emit(content_str)
-                        pdb.set_trace()  # 调试点
                         # 发送文本到语音集成模块
+                        # pdb.set_trace()
                         try:
                             from voice.voice_integration import get_voice_integration
                             voice_integration = get_voice_integration()
