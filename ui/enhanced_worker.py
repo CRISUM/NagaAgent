@@ -177,7 +177,9 @@ class StreamingWorker(EnhancedWorker):
                         # 发送流式数据到前端
                         self.stream_chunk.emit(content_str)
                         # 发送文本到语音集成模块
-                        # pdb.set_trace()
+                        print("content_str1:", content_str)
+                        pdb.set_trace()
+
                         try:
                             from voice.voice_integration import get_voice_integration
                             voice_integration = get_voice_integration()
@@ -193,8 +195,9 @@ class StreamingWorker(EnhancedWorker):
                     result_chunks.append(content_str)
                     self.stream_chunk.emit(content_str)
                     
-                    # 发送文本到语音集成模块
                     try:
+                        print("content_str2:", content_str)
+                        pdb.set_trace()
                         from voice.voice_integration import get_voice_integration
                         voice_integration = get_voice_integration()
                         voice_integration.receive_text_chunk(content_str)
@@ -225,14 +228,29 @@ class StreamingWorker(EnhancedWorker):
             
             if not self.is_cancelled:
                 # 发送最终完整文本到语音集成模块
-                try:
-                    from voice.voice_integration import get_voice_integration
-                    voice_integration = get_voice_integration()
-                    final_text = ''.join(result_chunks)
-                    voice_integration.receive_final_text(final_text)
-                except Exception as e:
-                    print(f"语音集成错误: {e}")
-                
+                # print("流式发送最终文本到语音集成模块...")
+                # pdb.set_trace()
+                # try:
+                #     from voice.voice_integration import get_voice_integration
+                #     voice_integration = get_voice_integration()
+                #     final_text = ''.join(result_chunks)
+                #     voice_integration.receive_final_text(final_text)
+                # except Exception as e:
+                #     print(f"语音集成错误: {e}")
+                print("no is_cancelled content_str:", content_str)
+                # pdb.set_trace()
+                # try:
+                #     from voice.voice_integration import get_voice_integration
+                #     voice_integration = get_voice_integration()
+
+                #     # 只补发最后一个 chunk，而不是整段
+                #     if result_chunks:
+                #         last_chunk = result_chunks[-1]
+                #         voice_integration.receive_text_chunk(last_chunk)
+
+                # except Exception as e:
+                #     print(f"语音集成错误: {e}")
+         
                 # 流式完成
                 self.stream_complete.emit()
                 
@@ -287,7 +305,6 @@ class BatchWorker(EnhancedWorker):
                     result_chunks.append(str(chunk))
             
             if not self.is_cancelled:
-                # 发送最终完整文本到语音集成模块
                 try:
                     from voice.voice_integration import get_voice_integration
                     voice_integration = get_voice_integration()

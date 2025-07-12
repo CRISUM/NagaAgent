@@ -37,7 +37,7 @@ class VoiceIntegration:
         self.tts_url = f"http://127.0.0.1:{config.tts.port}/v1/audio/speech"
         self.text_buffer = []  # 文本缓冲区
         self.sentence_endings = ['.', '!', '?', '。', '！', '？', '；', ';']
-        self.min_sentence_length = 10  # 最小句子长度
+        self.min_sentence_length = 5  # 最小句子长度
         self.max_buffer_size = 5  # 最大缓冲区大小
         
         # Minimax配置
@@ -82,8 +82,8 @@ class VoiceIntegration:
     
     def _check_and_play_sentences(self):
         """检查并播放完整句子"""
-        if len(self.text_buffer) < 2:
-            return
+        # if len(self.text_buffer) < 1:
+        #     return
             
         # 合并缓冲区文本
         combined_text = ' '.join(self.text_buffer)
@@ -94,7 +94,8 @@ class VoiceIntegration:
             pos = combined_text.rfind(ending)
             if pos > sentence_end_pos:
                 sentence_end_pos = pos
-        
+        print("sentence_end_pos:", sentence_end_pos)
+        print("combined_text:", combined_text)
         # 如果有完整句子且长度足够
         if sentence_end_pos > 0 and sentence_end_pos >= self.min_sentence_length:
             complete_sentence = combined_text[:sentence_end_pos + 1]
