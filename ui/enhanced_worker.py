@@ -8,8 +8,6 @@ import time
 from PyQt5.QtCore import QThread, pyqtSignal
 from ui.response_utils import extract_message
 
-import pdb
-
 class EnhancedWorker(QThread):
     """增强版工作线程"""
     
@@ -177,8 +175,6 @@ class StreamingWorker(EnhancedWorker):
                         # 发送流式数据到前端
                         self.stream_chunk.emit(content_str)
                         # 发送文本到语音集成模块
-                        print("content_str1:", content_str)
-                        pdb.set_trace()
 
                         try:
                             from voice.voice_integration import get_voice_integration
@@ -196,8 +192,6 @@ class StreamingWorker(EnhancedWorker):
                     self.stream_chunk.emit(content_str)
                     
                     try:
-                        print("content_str2:", content_str)
-                        pdb.set_trace()
                         from voice.voice_integration import get_voice_integration
                         voice_integration = get_voice_integration()
                         voice_integration.receive_text_chunk(content_str)
