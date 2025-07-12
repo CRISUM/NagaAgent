@@ -219,7 +219,7 @@ class TTSConfig(BaseModel):
     group_id: str = Field(default="", description="Minimax Group ID")
     tts_model: str = Field(default="speech-02-hd", description="Minimax模型")
     default_voice: str = Field(default="male-qn-qingse", description="Minimax语音ID")
-    minimax_emotion: str = Field(default="happy", description="Minimax情感")
+    emotion: str = Field(default="happy", description="Minimax情感")
 
 
 class QuickModelConfig(BaseModel):

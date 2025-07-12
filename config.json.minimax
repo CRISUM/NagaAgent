@@ -23,21 +23,21 @@
   },
   "tts":{
     "api_key": "",
-    "port": 5050,
+    "port": 5051,
     "default_voice": "danya_xuejie",
-    "default_format": "mp3",
+    "default_format": "pcm",
     "default_speed": 1.0,
     "default_language": "zh-CN",
     "require_api_key": false,
     "remove_filter": false,
     "expand_api": true,
     "provider": "minimax",
-    "group_id": "your_minimax_group_id_here",
+    "group_id": "",
     "tts_model": "speech-02-hd",
     "emotion": "neutral"
   },
   "grag":{
-    "neo4j_uri": "neo4j+s://7a74ff65.databases.neo4j.io",
-    "neo4j_password": "DEj1eCIxN0lhweTxVs-vhdTNDIk4SLG8Up1mpsZDrD8"
+    "neo4j_uri": "",
+    "neo4j_password": ""
   }
 }

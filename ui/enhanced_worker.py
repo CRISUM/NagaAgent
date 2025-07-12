@@ -7,7 +7,7 @@ import asyncio
 import time
 from PyQt5.QtCore import QThread, pyqtSignal
 from ui.response_utils import extract_message
-
+import pdb
 class EnhancedWorker(QThread):
     """增强版工作线程"""
     
@@ -91,7 +91,6 @@ class EnhancedWorker(QThread):
             async for chunk in self.naga.process(self.user_input):
                 if self.is_cancelled:
                     break
-                    
                 chunk_count += 1
                 
                 # 处理chunk格式 - 不进行extract_message处理，直接累积原始内容
@@ -192,6 +191,7 @@ class StreamingWorker(EnhancedWorker):
                     self.stream_chunk.emit(content_str)
                     
                     try:
+
                         from voice.voice_integration import get_voice_integration
                         voice_integration = get_voice_integration()
                         voice_integration.receive_text_chunk(content_str)

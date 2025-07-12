@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 # from handle_text import prepare_tts_input_with_context
 from config import config
+import ssl
 
 def start_http_server():
     """启动HTTP TTS服务器"""
@@ -43,6 +44,27 @@ def start_http_server():
     # http_server = WSGIServer(('0.0.0.0', config.tts.port), app)
     # http_server.serve_forever()
 
+# def establish_minimax_connection():
+#     """建立Minimax WebSocket连接"""
+#     url = "wss://api.minimaxi.com/ws/v1/t2a_v2"
+#     headers = {"Authorization": f"Bearer {config.tts.api_key}"}
+    
+#     ssl_context = ssl.create_default_context()
+#     ssl_context.check_hostname = False
+#     ssl_context.verify_mode = ssl.CERT_NONE
+    
+#     try:
+#         ws = await websockets.connect(url, additional_headers=headers, ssl=ssl_context)
+#         connected = json.loads(await ws.recv())
+#         if connected.get("event") == "connected_success":
+#             logger.info("Minimax WebSocket连接成功")
+#             return ws
+#         else:
+#             logger.error(f"Minimax连接失败: {connected}")
+#             return None
+#     except Exception as e:
+#         logger.error(f"Minimax WebSocket连接异常: {e}")
+#         return None
 
 def start_websocket_server():
     """启动WebSocket TTS服务器"""
@@ -56,7 +78,7 @@ def start_websocket_server():
         
         uvicorn.run(app, host="0.0.0.0", port=config.tts.port)
     except Exception as e:
-        print(f"❌ WebSocket服务器启动失败: {e}")
+        print(f"❌ edgeTTS WebSocket服务器启动失败: {e}")
         return False
 
 def check_dependencies():
