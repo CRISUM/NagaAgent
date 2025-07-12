@@ -52,7 +52,7 @@ def text_to_speech():
     # model = data.get('model', DEFAULT_MODEL)
     voice = data.get('voice', DEFAULT_VOICE)
 
-    response_format = data.get('response_format', DEFAULT_RESPONSE_FORMAT)
+    response_format = data.get('response_format', 'mp3')
     speed = float(data.get('speed', DEFAULT_SPEED))
     
     mime_type = AUDIO_FORMAT_MIME_TYPES.get(response_format, "audio/mpeg")
@@ -61,7 +61,7 @@ def text_to_speech():
     output_file_path = generate_speech(text, voice, response_format, speed)
 
     # Return the file with the correct MIME type
-    return send_file(output_file_path, mimetype=mime_type, as_attachment=True, download_name=f"speech.{response_format}")
+    return send_file(output_file_path, mimetype=mime_type, as_attachment=True, download_name=f"speech.mp3")
 
 @app.route('/v1/models', methods=['GET', 'POST'])
 @app.route('/models', methods=['GET', 'POST'])

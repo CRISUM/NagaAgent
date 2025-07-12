@@ -141,7 +141,7 @@ class VoiceIntegration:
                 temp_file_path = temp_file.name
             
             # 使用系统默认播放器播放
-            await self._play_audio_file(temp_file_path)
+            await self._play_with_pygame(temp_file_path)
             
             # 清理临时文件
             try:
@@ -165,9 +165,11 @@ class VoiceIntegration:
                 # Windows使用winsound或windows media player
                 try:
                     import winsound
-                    winsound.PlaySound(file_path, winsound.SND_FILENAME)
+                    os.startfile(file_path)
                 except ImportError:
                     subprocess.run(["start", "", file_path], shell=True, check=False)
+                except Exception as e:
+                    logger.error(f"os.startfile 播放失败: {e}")
             elif system == "Darwin":  # macOS
                 subprocess.run(["afplay", file_path], check=False)
             elif system == "Linux":
