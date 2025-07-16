@@ -5,6 +5,13 @@ import html2text  # 用于HTML转Markdown #
 import os
 from dotenv import load_dotenv
 from agents import Agent, AgentHooks, RunContextWrapper
+<<<<<<< HEAD
+=======
+# 移除循环导入
+# from .controller import BrowserAgent
+# from .browser import ContentAgent
+from config import config  # 使用新的配置系统
+>>>>>>> 8ef12f3ea0ad0b30e4c7855137f8b013161007a6
 
 AD_SELECTORS = [
     'script', 'style', 'iframe', 'ins', '.ads', '[class*="ads"]', '[id*="ads"]',
@@ -118,6 +125,7 @@ class ContentAgent:
             return f"ContentAgent处理失败: {str(e)}"
 
 load_dotenv()
+<<<<<<< HEAD
 API_KEY = os.getenv("DEEPSEEK_API_KEY")
 BASE_URL = os.getenv("DEEPSEEK_BASE_URL")
 MODEL_NAME = os.getenv("DEEPSEEK_MODEL")
@@ -129,3 +137,23 @@ ContentAgent = Agent(
     hooks=ContentAgentHooks(),
     model=MODEL_NAME
 ) 
+=======
+# 从config中获取API配置
+API_KEY = config.api.api_key
+BASE_URL = config.api.base_url
+MODEL_NAME = config.api.model
+
+# 延迟创建ContentAgent实例，避免循环导入
+def create_content_agent():
+    """创建ContentAgent实例的工厂函数"""
+    return Agent(
+        name="ContentAgent",
+        instructions="你负责对网页内容进行清洗、摘要、翻译等处理。",
+        tools=[PlaywrightBrowser],
+        hooks=ContentAgentHooks(),
+        model=MODEL_NAME
+    )
+
+# 为了向后兼容，保留ContentAgent变量
+ContentAgent = create_content_agent() 
+>>>>>>> 8ef12f3ea0ad0b30e4c7855137f8b013161007a6

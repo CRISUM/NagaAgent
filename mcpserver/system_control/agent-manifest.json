@@ -3,11 +3,26 @@
   "displayName": "系统控制Agent",
   "version": "1.0.0",
   "description": "支持系统控制：定时关机、屏幕亮度调节、音量调节。",
+<<<<<<< HEAD
   "agentType": "synchronous",
+=======
+  "author": "Naga系统控制模块",
+  "agentType": "mcp",
+>>>>>>> 8ef12f3ea0ad0b30e4c7855137f8b013161007a6
   "entryPoint": {
     "module": "mcpserver.system_control.agent_system_control",
     "class": "SystemControlAgent"
   },
+<<<<<<< HEAD
+=======
+  "factory": {
+    "create_instance": "create_system_control_agent"
+  },
+  "communication": {
+    "protocol": "stdio",
+    "timeout": 15000
+  },
+>>>>>>> 8ef12f3ea0ad0b30e4c7855137f8b013161007a6
   "capabilities": {
     "invocationCommands": [
       {
@@ -36,5 +51,17 @@
       "confirm": {"type": "string", "description": "关机确认（Y/N，shutdown第二次调用时必需）"}
     },
     "required": ["action"]
+<<<<<<< HEAD
+=======
+  },
+  "configSchema": {
+    "SYSTEM_CONTROL_AGENT_TIMEOUT": "integer"
+  },
+  "runtime": {
+    "instance": null,
+    "is_initialized": false,
+    "last_used": null,
+    "usage_count": 0
+>>>>>>> 8ef12f3ea0ad0b30e4c7855137f8b013161007a6
   }
 } 

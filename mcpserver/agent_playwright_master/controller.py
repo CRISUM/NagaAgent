@@ -1,6 +1,7 @@
 from playwright.async_api import async_playwright, Page
 import asyncio, re, json
 from typing import Any, Dict, List
+<<<<<<< HEAD
 from config import *  # 配置参数统一管理 #
 import os
 from dotenv import load_dotenv
@@ -11,6 +12,20 @@ load_dotenv()
 API_KEY = os.getenv("DEEPSEEK_API_KEY")
 BASE_URL = os.getenv("DEEPSEEK_BASE_URL")
 MODEL_NAME = os.getenv("DEEPSEEK_MODEL")
+=======
+from config import config  # 使用新的配置系统
+import os
+from dotenv import load_dotenv
+from agents import Agent, AgentHooks, RunContextWrapper
+# 移除循环导入，延迟导入
+# from .browser import PlaywrightBrowser
+
+load_dotenv()
+# 从config中获取API配置
+API_KEY = config.api.api_key
+BASE_URL = config.api.base_url
+MODEL_NAME = config.api.model
+>>>>>>> 8ef12f3ea0ad0b30e4c7855137f8b013161007a6
 
 class PlaywrightController:
     """Playwright控制器，负责页面操作、自动化流程等 #"""
@@ -147,6 +162,7 @@ class BrowserAgent:
         except Exception as e:
             return f"BrowserAgent处理失败: {str(e)}"
 
+<<<<<<< HEAD
 BrowserAgent = Agent(
     name="BrowserAgent",
     instructions="你负责网页自动化操作，如打开、点击、输入、滚动、截图等。",
@@ -154,3 +170,18 @@ BrowserAgent = Agent(
     hooks=BrowserAgentHooks(),
     model=MODEL_NAME
 ) 
+=======
+# 延迟创建BrowserAgent实例，避免循环导入
+def create_browser_agent():
+    """创建BrowserAgent实例的工厂函数"""
+    return Agent(
+        name="BrowserAgent",
+        instructions="你负责网页自动化操作，如打开、点击、输入、滚动、截图等。",
+        tools=[PlaywrightController],
+        hooks=BrowserAgentHooks(),
+        model=MODEL_NAME
+    )
+
+# 为了向后兼容，保留BrowserAgent变量
+BrowserAgent = create_browser_agent() 
+>>>>>>> 8ef12f3ea0ad0b30e4c7855137f8b013161007a6

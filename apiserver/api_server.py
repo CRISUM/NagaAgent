@@ -23,7 +23,7 @@ import aiohttp
 
 # 导入NagaAgent核心模块
 from conversation_core import NagaConversation
-from config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL, TEMPERATURE, MAX_TOKENS
+from config import config  # 使用新的配置系统
 from ui.response_utils import extract_message  # 导入消息提取工具
 
 # 全局NagaAgent实例
@@ -180,7 +180,7 @@ async def get_system_info():
         version="3.0",
         status="running",
         available_services=naga_agent.mcp.list_mcps(),
-        api_key_configured=bool(DEEPSEEK_API_KEY and DEEPSEEK_API_KEY != "sk-placeholder-key-not-set")
+        api_key_configured=bool(config.api.api_key and config.api.api_key != "sk-placeholder-key-not-set")
     )
 
 @app.post("/chat", response_model=ChatResponse)
@@ -203,16 +203,16 @@ async def chat(request: ChatRequest):
             """调用LLM API"""
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{DEEPSEEK_BASE_URL}/v1/chat/completions",
+                    f"{config.api.base_url}/v1/chat/completions",
                     headers={
-                        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                        "Authorization": f"Bearer {config.api.api_key}",
                         "Content-Type": "application/json"
                     },
                     json={
-                        "model": DEEPSEEK_MODEL,
+                        "model": config.api.model,
                         "messages": messages,
-                        "temperature": TEMPERATURE,
-                        "max_tokens": MAX_TOKENS,
+                        "temperature": config.api.temperature,
+                        "max_tokens": config.api.max_tokens,
                         "stream": False
                     }
                 ) as resp:
@@ -262,16 +262,16 @@ async def chat_stream(request: ChatRequest):
                 """调用LLM API"""
                 async with aiohttp.ClientSession() as session:
                     async with session.post(
-                        f"{DEEPSEEK_BASE_URL}/v1/chat/completions",
+                        f"{config.api.base_url}/v1/chat/completions",
                         headers={
-                            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                            "Authorization": f"Bearer {config.api.api_key}",
                             "Content-Type": "application/json"
                         },
                         json={
-                            "model": DEEPSEEK_MODEL,
+                            "model": config.api.model,
                             "messages": messages,
-                            "temperature": TEMPERATURE,
-                            "max_tokens": MAX_TOKENS,
+                            "temperature": config.api.temperature,
+                            "max_tokens": config.api.max_tokens,
                             "stream": False
                         }
                     ) as resp:
@@ -340,16 +340,104 @@ async def get_mcp_services():
         raise HTTPException(status_code=503, detail="NagaAgent未初始化")
     
     try:
-        services = naga_agent.mcp.list_mcps()
+        # 使用动态服务池查询
+        services = naga_agent.mcp.get_available_services()
+        statistics = naga_agent.mcp.get_service_statistics()
+        
         return {
             "status": "success",
             "services": services,
+            "statistics": statistics,
             "count": len(services)
         }
     except Exception as e:
         print(f"获取MCP服务列表错误: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"获取服务列表失败: {str(e)}")
+
+@app.get("/mcp/services/{service_name}")
+async def get_mcp_service_detail(service_name: str):
+    """获取指定MCP服务的详细信息"""
+    if not naga_agent:
+        raise HTTPException(status_code=503, detail="NagaAgent未初始化")
+    
+    try:
+        # 使用动态服务池查询
+        service_info = naga_agent.mcp.query_service_by_name(service_name)
+        if not service_info:
+            raise HTTPException(status_code=404, detail=f"服务 {service_name} 不存在")
+        
+        return {
+            "status": "success",
+            "service": service_info
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"获取MCP服务详情错误: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取服务详情失败: {str(e)}")
+
+@app.get("/mcp/services/search/{capability}")
+async def search_mcp_services(capability: str):
+    """根据能力关键词搜索MCP服务"""
+    if not naga_agent:
+        raise HTTPException(status_code=503, detail="NagaAgent未初始化")
+    
+    try:
+        # 使用动态服务池查询
+        matching_services = naga_agent.mcp.query_services_by_capability(capability)
+        
+        return {
+            "status": "success",
+            "capability": capability,
+            "services": matching_services,
+            "count": len(matching_services)
+        }
+    except Exception as e:
+        print(f"搜索MCP服务错误: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"搜索服务失败: {str(e)}")
+
+@app.get("/mcp/services/{service_name}/tools")
+async def get_mcp_service_tools(service_name: str):
+    """获取指定MCP服务的可用工具列表"""
+    if not naga_agent:
+        raise HTTPException(status_code=503, detail="NagaAgent未初始化")
+    
+    try:
+        # 使用动态服务池查询
+        tools = naga_agent.mcp.get_service_tools(service_name)
+        
+        return {
+            "status": "success",
+            "service_name": service_name,
+            "tools": tools,
+            "count": len(tools)
+        }
+    except Exception as e:
+        print(f"获取MCP服务工具列表错误: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取工具列表失败: {str(e)}")
+
+@app.get("/mcp/statistics")
+async def get_mcp_statistics():
+    """获取MCP服务统计信息"""
+    if not naga_agent:
+        raise HTTPException(status_code=503, detail="NagaAgent未初始化")
+    
+    try:
+        # 使用动态服务池查询
+        statistics = naga_agent.mcp.get_service_statistics()
+        
+        return {
+            "status": "success",
+            "statistics": statistics
+        }
+    except Exception as e:
+        print(f"获取MCP统计信息错误: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取统计信息失败: {str(e)}")
 
 @app.post("/system/devmode")
 async def toggle_devmode():
@@ -389,7 +477,7 @@ async def get_memory_stats():
 # 工具调用循环相关函数
 
 def parse_tool_calls(content: str) -> list:
-    """解析TOOL_REQUEST格式的工具调用"""
+    """解析TOOL_REQUEST格式的工具调用，支持MCP和Agent两种类型"""
     tool_calls = []
     tool_request_start = "<<<[TOOL_REQUEST]>>>"
     tool_request_end = "<<<[END_TOOL_REQUEST]>>>"
@@ -403,18 +491,51 @@ def parse_tool_calls(content: str) -> list:
             start_index = start_pos + len(tool_request_start)
             continue
         tool_content = content[start_pos + len(tool_request_start):end_pos].strip()
-        tool_name = None
+        
+        # 先解析所有参数
         tool_args = {}
         param_pattern = r'(\w+)\s*:\s*「始」([\s\S]*?)「末」'
         for match in re.finditer(param_pattern, tool_content):
             key = match.group(1)
             value = match.group(2).strip()
-            if key == 'tool_name':
-                tool_name = value
-            else:
-                tool_args[key] = value
-        if tool_name:
-            tool_calls.append({'name': tool_name, 'args': tool_args})
+            tool_args[key] = value
+        
+        # 判断调用类型
+        agent_type = tool_args.get('agentType', 'mcp').lower()
+        
+        if agent_type == 'agent':
+            # Agent类型调用格式
+            agent_name = tool_args.get('agent_name')
+            prompt = tool_args.get('prompt')
+            if agent_name and prompt:
+                tool_calls.append({
+                    'name': 'agent_call',
+                    'args': {
+                        'agentType': 'agent',
+                        'agent_name': agent_name,
+                        'prompt': prompt
+                    }
+                })
+        else:
+            # MCP类型调用格式（包括默认mcp和旧格式）
+            tool_name = tool_args.get('tool_name')
+            if tool_name:
+                # 新格式：有service_name
+                if 'service_name' in tool_args:
+                    tool_calls.append({
+                        'name': tool_name,
+                        'args': tool_args
+                    })
+                else:
+                    # 旧格式：tool_name作为服务名
+                    service_name = tool_name
+                    tool_args['service_name'] = service_name
+                    tool_args['agentType'] = 'mcp'
+                    tool_calls.append({
+                        'name': tool_name,
+                        'args': tool_args
+                    })
+        
         start_index = end_pos + len(tool_request_end)
     return tool_calls
 
@@ -423,11 +544,42 @@ async def execute_tool_calls(tool_calls: list, mcp_manager) -> str:
     results = []
     for tool_call in tool_calls:
         try:
-            result = await mcp_manager.handoff(
-                service_name=tool_call['name'],
-                task=tool_call['args']
-            )
-            results.append(f"来自工具 \"{tool_call['name']}\" 的结果:\n{result}")
+            tool_name = tool_call['name']
+            args = tool_call['args']
+            agent_type = args.get('agentType', 'mcp').lower()
+            
+            # 根据agentType分流处理
+            if agent_type == 'agent':
+                # Agent类型：交给AgentManager处理
+                try:
+                    from mcpserver.agent_manager import get_agent_manager
+                    agent_manager = get_agent_manager()
+                    
+                    agent_name = args.get('agent_name')
+                    prompt = args.get('prompt')
+                    
+                    if not agent_name or not prompt:
+                        result = "Agent调用失败: 缺少agent_name或prompt参数"
+                    else:
+                        # 直接调用Agent
+                        result = await agent_manager.call_agent(agent_name, prompt)
+                        if result.get("status") == "success":
+                            result = result.get("result", "")
+                        else:
+                            result = f"Agent调用失败: {result.get('error', '未知错误')}"
+                            
+                except Exception as e:
+                    result = f"Agent调用失败: {str(e)}"
+                    
+            else:
+                # MCP类型：走handoff流程
+                service_name = args.get('service_name', tool_name)
+                result = await mcp_manager.handoff(
+                    service_name=service_name,
+                    task=args
+                )
+            
+            results.append(f"来自工具 \"{tool_name}\" 的结果:\n{result}")
         except Exception as e:
             error_result = f"执行工具 {tool_call['name']} 时发生错误：{str(e)}"
             results.append(error_result)

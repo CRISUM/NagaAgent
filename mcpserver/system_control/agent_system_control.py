@@ -72,4 +72,13 @@ class SystemControlAgent(Agent):
             else:
                 return "未安装pycaw库，无法调节音量"
         else:
+<<<<<<< HEAD
             return "未知操作" 
+=======
+            return "未知操作"
+
+# 工厂函数，用于动态注册系统创建实例
+def create_system_control_agent():
+    """创建SystemControlAgent实例的工厂函数"""
+    return SystemControlAgent() 
+>>>>>>> 8ef12f3ea0ad0b30e4c7855137f8b013161007a6

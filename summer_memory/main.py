@@ -1,19 +1,78 @@
-from .extractor_ds_tri import extract_triples
-from .graph import store_triples
-from .visualize import visualize_triples
-from .rag_query_tri import query_knowledge, set_context
 import os
+import sys
+import subprocess
+import atexit
 import logging
 import traceback
 import webbrowser
 
+from .extractor_ds_tri import extract_triples
+from .graph import store_triples
+from .visualize import visualize_triples
+from .rag_query_tri import query_knowledge, set_context
+
+# 添加上级目录以导入 config.py
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from config import GRAG_NEO4J_URI, GRAG_NEO4J_USER, GRAG_NEO4J_PASSWORD, GRAG_NEO4J_DATABASE
+
+# 日志配置
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-def batch_add_texts(texts): # 批量处理文本，提取三元组并存储
+
+# --- Docker 控制逻辑 ---
+def generate_docker_compose(template_path="docker-compose.template.yml", output_path="docker-compose.yml"):
+    try:
+        with open(template_path, "r", encoding="utf-8") as f:
+            template = f.read()
+        auth = f"{GRAG_NEO4J_USER}/{GRAG_NEO4J_PASSWORD}"
+        content = template.replace("${NEO4J_AUTH}", auth).replace("${NEO4J_DB}", GRAG_NEO4J_DATABASE)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        logger.info("已根据 config.py 生成 docker-compose.yml")
+    except Exception as e:
+        logger.error(f"生成 docker-compose.yml 失败: {e}")
+        raise
+
+def is_neo4j_running():
+    try:
+        output = subprocess.check_output(["docker", "ps", "--filter", "name=rag_neo4j", "--filter", "status=running", "--format", "{{.Names}}"])
+        return "rag_neo4j" in output.decode("utf-8")
+    except Exception as e:
+        logger.error(f"检查容器状态失败: {e}")
+        return False
+
+def start_neo4j_container():
+    if is_neo4j_running():
+        logger.info("Neo4j 容器已在运行，无需重新启动。")
+        return
+    try:
+        generate_docker_compose()
+        logger.info("正在启动 Neo4j Docker 容器...")
+        subprocess.run(["docker-compose", "up", "-d"], check=True)
+        logger.info("Neo4j 容器已启动。")
+    except subprocess.CalledProcessError:
+        logger.error("启动 Neo4j 容器失败，请检查 Docker 配置")
+        raise
+
+
+def stop_neo4j_container():
+    try:
+        logger.info("正在关闭 Neo4j Docker 容器...")
+        subprocess.run(["docker-compose", "down"], check=True)
+        logger.info("Neo4j 容器已关闭。")
+    except subprocess.CalledProcessError:
+        logger.warning("Neo4j 容器关闭失败")
+
+
+atexit.register(stop_neo4j_container)
+
+
+# --- 核心业务逻辑 ---
+def batch_add_texts(texts):# 批量处理文本，提取三元组并存储
     try:
         all_triples = set()
         for text in texts:
@@ -27,29 +86,31 @@ def batch_add_texts(texts): # 批量处理文本，提取三元组并存储
             else:
                 logger.info(f"提取到三元组: {triples}")
             all_triples.update(triples)
+
         if not all_triples:
             logger.warning("未提取到任何三元组")
             return False
-        logger.info(f"共提取到 {len(all_triples)} 个三元组")
+
         valid_triples = [
-            t for t in all_triples
-            if all(t) and all(isinstance(x, str) and x.strip() for x in t)
+            t for t in all_triples if all(t) and all(isinstance(x, str) and x.strip() for x in t)
         ]
+
         if len(valid_triples) < len(all_triples):
-            logger.warning(f"有 {len(all_triples) - len(valid_triples)} 个三元组包含空值，已被过滤")
+            logger.warning(f"过滤掉 {len(all_triples) - len(valid_triples)} 个无效三元组")
 
         if not valid_triples:
-            logger.warning("未提取到有效的三元组")
+            logger.warning("无有效三元组")
             return False
 
         store_triples(valid_triples)
-        set_context(texts)  # 设置查询上下文
+        set_context(texts)# 设置查询上下文
         return True
     except Exception as e:
-        logger.error(f"批量处理文本失败: {e}")
+        logger.error(f"处理文本失败: {e}")
         return False
 
-def batch_add_from_file(filename): # 从文件批量处理文本
+
+def batch_add_from_file(filename):# 从文件批量处理文本
     try:
         if not os.path.exists(filename):
             logger.error(f"文件 {filename} 不存在")
@@ -59,13 +120,11 @@ def batch_add_from_file(filename): # 从文件批量处理文本
         if not texts:
             logger.warning(f"文件 {filename} 为空")
             return False
-        logger.info(f"从文件 {filename} 读取 {len(texts)} 条文本")
+        logger.info(f"读取文件 {filename} 共 {len(texts)} 条文本")
         return batch_add_texts(texts)
-
-
     except Exception as e:
         logger.error(f"批量处理文本失败: {e}")
-        traceback.print_exc()  # 打印完整错误堆栈信息
+        traceback.print_exc()# 打印完整错误堆栈信息
         return False
 
 

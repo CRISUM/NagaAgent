@@ -3,12 +3,25 @@
   "displayName": "代码编辑Agent",
   "version": "1.0.0",
   "description": "支持代码编辑、读取、运行和shell命令执行。",
+<<<<<<< HEAD
   "author": "Naga团队",
   "agentType": "synchronous",
+=======
+  "author": "Naga代码生成模块",
+  "agentType": "mcp",
+>>>>>>> 8ef12f3ea0ad0b30e4c7855137f8b013161007a6
   "entryPoint": {
     "module": "mcpserver.agent_coder.agent_coder",
     "class": "CoderAgent"
   },
+<<<<<<< HEAD
+=======
+  "factory": {
+    "create_instance": "create_coder_agent",
+    "validate_config": "validate_agent_config",
+    "get_dependencies": "get_agent_dependencies"
+  },
+>>>>>>> 8ef12f3ea0ad0b30e4c7855137f8b013161007a6
   "communication": {
     "protocol": "stdio",
     "timeout": 15000
@@ -51,5 +64,14 @@
   },
   "configSchema": {
     "CODE_AGENT_DEFAULT_TIMEOUT": "integer"
+<<<<<<< HEAD
+=======
+  },
+  "runtime": {
+    "instance": null,
+    "is_initialized": false,
+    "last_used": null,
+    "usage_count": 0
+>>>>>>> 8ef12f3ea0ad0b30e4c7855137f8b013161007a6
   }
 } 

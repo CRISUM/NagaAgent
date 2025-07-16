@@ -13,8 +13,7 @@ from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from mcpserver.mcp_registry import MCP_REGISTRY, register_all_handoffs # MCP服务注册表和handoff批量注册
-from mcpserver.websocket_manager import get_websocket_manager # 导入WebSocket管理器
+from mcpserver.mcp_registry import MCP_REGISTRY # MCP服务注册表
 
 from config import DEBUG, LOG_LEVEL
 
@@ -131,17 +130,9 @@ class MCPManager:
         self.handoff_filters = {} # 服务对应的handoff过滤器
         self.handoff_callbacks = {} # 服务对应的handoff回调
         self.logger = logging.getLogger("MCPManager")
-        self.websocket_manager = get_websocket_manager() # 获取WebSocket管理器
         sys.stderr.write("MCPManager初始化\n")
         
-    async def initialize_websocket(self, host: str = '127.0.0.1', port: int = 8081):
-        """初始化WebSocket管理器"""
-        try:
-            self.websocket_manager.set_mcp_manager(self)
-            await self.websocket_manager.start_server(host, port)
-            sys.stderr.write(f"WebSocket管理器已启动: ws://{host}:{port}\n")
-        except Exception as e:
-            sys.stderr.write(f"WebSocket管理器启动失败: {e}\n")
+
         
     def register_handoff(
         self,
@@ -186,11 +177,6 @@ class MCPManager:
         """执行handoff"""
         try:
             # 通知handoff调用开始
-            await self.websocket_manager.notify_handoff_call(
-                service_name=service_name,
-                task=task,
-                status="started"
-            )
             
             # 修复中文编码问题
             task_json = json.dumps(task, ensure_ascii=False)
@@ -238,12 +224,6 @@ class MCPManager:
             sys.stderr.write(f"代理handoff执行结果: {result}\n".encode('utf-8', errors='replace').decode('utf-8'))
             
             # 通知handoff调用成功
-            await self.websocket_manager.notify_handoff_call(
-                service_name=service_name,
-                task=task,
-                status="success",
-                result=result
-            )
             
             return result
             
@@ -254,12 +234,6 @@ class MCPManager:
             traceback.print_exc(file=sys.stderr)
             
             # 通知handoff调用失败
-            await self.websocket_manager.notify_handoff_call(
-                service_name=service_name,
-                task=task,
-                status="error",
-                error=error_msg
-            )
             
             return json.dumps({
                 "status": "error",
@@ -369,6 +343,40 @@ class MCPManager:
             logger.error(f"调用工具 {service_name}.{tool_name} 失败: {str(e)}")
             import traceback;traceback.print_exc(file=sys.stderr)
             return None
+
+    async def unified_call(self, service_name: str, tool_name: str, args: dict):
+        """统一调用接口，支持MCP服务和Agent服务
+        
+        Args:
+            service_name: 服务名称
+            tool_name: 工具名称
+            args: 工具参数
+            
+        Returns:
+            调用结果
+        """
+        try:
+            # 首先尝试作为handoff服务调用
+            if service_name in self.services:
+                return await self.handoff(service_name, args)
+            
+            # 然后尝试作为MCP服务调用
+            if service_name in MCP_REGISTRY:
+                agent = MCP_REGISTRY[service_name]
+                if hasattr(agent, 'handle_handoff'):
+                    return await agent.handle_handoff(args)
+                elif hasattr(agent, tool_name):
+                    method = getattr(agent, tool_name)
+                    if callable(method):
+                        return await method(**args) if asyncio.iscoroutinefunction(method) else method(**args)
+            
+            # 最后尝试作为传统MCP服务调用
+            return await self.call_service_tool(service_name, tool_name, args)
+            
+        except Exception as e:
+            logger.error(f"统一调用失败 {service_name}.{tool_name}: {str(e)}")
+            import traceback;traceback.print_exc(file=sys.stderr)
+            return f"调用失败: {str(e)}"
             
     def get_available_services(self) -> list:
         """获取所有可用的MCP服务列表
@@ -376,10 +384,121 @@ class MCPManager:
         Returns:
             list: 可用服务列表
         """
+        from mcpserver.mcp_registry import get_all_services_info # 动态服务池查询
+        services_info = get_all_services_info()
+        
         return [
-            {"name": k, "description": getattr(v, 'instructions', ''), "id": k}
-            for k, v in MCP_REGISTRY.items()
+            {
+                "name": name,
+                "description": info.get('description', ''),
+                "display_name": info.get('display_name', name),
+                "version": info.get('version', '1.0.0'),
+                "available_tools": info.get('available_tools', []),
+                "id": name
+            }
+            for name, info in services_info.items()
         ]
+            
+    def get_available_services_filtered(self) -> dict:
+        """获取过滤后的服务列表，分为MCP服务和Agent服务
+        
+        Returns:
+            dict: 包含mcp_services和agent_services的服务列表
+        """
+        from mcpserver.mcp_registry import get_all_services_info, get_service_statistics # 动态服务池查询
+        
+        mcp_services = []
+        agent_services = []
+        
+        # 从动态服务池获取所有已注册的MCP服务信息
+        services_info = get_all_services_info()
+        for name, info in services_info.items():
+            service_info = {
+                "name": name,
+                "description": info.get('description', ''),
+                "display_name": info.get('display_name', name),
+                "version": info.get('version', '1.0.0'),
+                "available_tools": info.get('available_tools', []),
+                "id": name
+            }
+            # 动态服务池中的服务都是MCP类型，归类为mcp_services
+            mcp_services.append(service_info)
+        
+        # 从handoff服务中获取Agent服务信息（这些是handoff配置）
+        for service_name, service_config in self.services.items():
+            agent_service_info = {
+                "name": service_name,
+                "description": service_config.get("tool_description", ""),
+                "tool_name": service_config.get("tool_name", ""),
+                "id": service_name
+            }
+            # handoff服务配置归类为agent_services
+            agent_services.append(agent_service_info)
+        
+        return {
+            "mcp_services": mcp_services,
+            "agent_services": agent_services
+        }
+    
+    def query_service_by_name(self, service_name: str) -> Optional[Dict[str, Any]]:
+        """根据服务名称查询服务详细信息
+        
+        Args:
+            service_name: 服务名称
+            
+        Returns:
+            Optional[Dict[str, Any]]: 服务详细信息
+        """
+        from mcpserver.mcp_registry import get_service_info # 动态服务池查询
+        return get_service_info(service_name)
+    
+    def query_services_by_capability(self, capability: str) -> List[Dict[str, Any]]:
+        """根据能力关键词查询服务
+        
+        Args:
+            capability: 能力关键词
+            
+        Returns:
+            List[Dict[str, Any]]: 匹配的服务列表
+        """
+        from mcpserver.mcp_registry import query_services_by_capability, get_service_info # 动态服务池查询
+        
+        matching_service_names = query_services_by_capability(capability)
+        matching_services = []
+        
+        for service_name in matching_service_names:
+            service_info = get_service_info(service_name)
+            if service_info:
+                matching_services.append({
+                    "name": service_name,
+                    "description": service_info.get('description', ''),
+                    "display_name": service_info.get('display_name', service_name),
+                    "version": service_info.get('version', '1.0.0'),
+                    "available_tools": service_info.get('available_tools', [])
+                })
+        
+        return matching_services
+    
+    def get_service_statistics(self) -> Dict[str, Any]:
+        """获取服务统计信息
+        
+        Returns:
+            Dict[str, Any]: 统计信息
+        """
+        from mcpserver.mcp_registry import get_service_statistics # 动态服务池查询
+        return get_service_statistics()
+    
+    def get_service_tools(self, service_name: str) -> List[Dict[str, Any]]:
+        """获取指定服务的可用工具列表
+        
+        Args:
+            service_name: 服务名称
+            
+        Returns:
+            List[Dict[str, Any]]: 工具列表
+        """
+        from mcpserver.mcp_registry import get_available_tools # 动态服务池查询
+        return get_available_tools(service_name)
             
     def format_available_services(self) -> str:
         """格式化可用服务列表为字符串
@@ -387,10 +506,24 @@ class MCPManager:
         Returns:
             str: 格式化后的服务列表字符串
         """
-        return "\n".join([
-            f"- {name}: {info['tool_description']}"
-            for name, info in self.services.items()
-        ])
+        from mcpserver.mcp_registry import get_all_services_info # 动态服务池查询
+        
+        services_info = get_all_services_info()
+        formatted_services = []
+        
+        for name, info in services_info.items():
+            description = info.get('description', '')
+            tools = info.get('available_tools', [])
+            tool_names = [tool.get('name', '') for tool in tools]
+            
+            if description:
+                formatted_services.append(f"- {name}: {description}")
+                if tool_names:
+                    formatted_services.append(f"  可用工具: {', '.join(tool_names)}")
+            else:
+                formatted_services.append(f"- {name}")
+        
+        return "\n".join(formatted_services)
             
     async def cleanup(self):
         """清理所有MCP服务连接"""
@@ -405,6 +538,17 @@ class MCPManager:
 
     def get_mcp(self, name): return MCP_REGISTRY.get(name) # 获取MCP服务
     def list_mcps(self): return list(MCP_REGISTRY.keys()) # 列出所有MCP服务 
+
+    def auto_register_services(self):
+        """自动注册所有MCP服务和handoff"""
+        try:
+            # 新的动态注册系统已经自动扫描并注册了所有MCP服务
+            # 不再需要手动注册handoff服务
+            sys.stderr.write("✅ MCP服务已通过动态扫描自动注册完成\n")
+        except Exception as e:
+            sys.stderr.write(f"❌ 自动注册服务失败: {e}\n")
+            import traceback
+            traceback.print_exc(file=sys.stderr)
 
 _MCP_MANAGER=None
 def get_mcp_manager():
