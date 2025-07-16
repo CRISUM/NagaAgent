@@ -5,22 +5,24 @@ from PyQt5.QtCore import Qt, QRect, QThread, pyqtSignal, QParallelAnimationGroup
 from PyQt5.QtGui import QColor, QPainter, QBrush, QFont, QPixmap, QPalette, QPen
 from conversation_core import NagaConversation
 import os
-import config # 导入全局配置
+from config import config # 导入统一配置
 from ui.response_utils import extract_message  # 新增：引入消息提取工具
 from ui.progress_widget import EnhancedProgressWidget  # 导入进度组件
 from ui.enhanced_worker import StreamingWorker, BatchWorker  # 导入增强Worker
 from ui.elegant_settings_widget import ElegantSettingsWidget
 import asyncio
 import json
-import websockets
+import threading
 from PyQt5.QtCore import QObject, pyqtSignal as Signal
-BG_ALPHA=0.5 # 聊天背景透明度50%
-WINDOW_BG_ALPHA=110 # 主窗口背景透明度 (0-255，220约为86%不透明度)
-USER_NAME=os.getenv('COMPUTERNAME')or os.getenv('USERNAME')or'用户' # 自动识别电脑名
-MAC_BTN_SIZE=36 # mac圆按钮直径扩大1.5倍
-MAC_BTN_MARGIN=16 # 右侧边距
-MAC_BTN_GAP=12 # 按钮间距
-ANIMATION_DURATION = 600  # 动画时长统一配置，增加到600ms让动画更丝滑
+
+# 使用统一配置系统
+BG_ALPHA = config.ui.bg_alpha
+WINDOW_BG_ALPHA = config.ui.window_bg_alpha
+USER_NAME = config.ui.user_name
+MAC_BTN_SIZE = config.ui.mac_btn_size
+MAC_BTN_MARGIN = config.ui.mac_btn_margin
+MAC_BTN_GAP = config.ui.mac_btn_gap
+ANIMATION_DURATION = config.ui.animation_duration
 
 class TitleBar(QWidget):
     def __init__(s, text, parent=None):
@@ -130,198 +132,14 @@ class AnimatedSideWidget(QWidget):
 class AutoFitLabel(QLabel):
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
-        self._img_path = os.path.join(os.path.dirname(__file__), 'standby.png')
+        self.setWordWrap(True)
     def resizeEvent(self, event):
-        if os.path.exists(self._img_path):
-            q = QPixmap(self._img_path)
-            if not q.isNull():
-                self.setPixmap(q.scaled(self.width(), self.height(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation))
         super().resizeEvent(event)
-
-class WebSocketClient(QObject):
-    """WebSocket客户端，用于接收MCP推送消息"""
-    
-    # 定义信号
-    message_received = Signal(str, str)  # 消息类型, 消息内容
-    connection_status = Signal(bool, str)  # 连接状态, 状态信息
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.websocket = None
-        self.connected = False
-        self.uri = "ws://127.0.0.1:8000/ws/mcplog"  # 使用API服务器的WebSocket端点
-        
-    async def connect(self):
-        """连接到WebSocket服务器"""
-        try:
-            self.websocket = await websockets.connect(self.uri)
-            self.connected = True
-            self.connection_status.emit(True, "WebSocket连接成功")
-            print("✅ WebSocket客户端已连接")
-            return True
-        except Exception as e:
-            self.connected = False
-            self.connection_status.emit(False, f"WebSocket连接失败: {e}")
-            print(f"❌ WebSocket连接失败: {e}")
-            return False
-    
-    async def disconnect(self):
-        """断开WebSocket连接"""
-        if self.websocket:
-            await self.websocket.close()
-            self.connected = False
-            self.connection_status.emit(False, "WebSocket连接已断开")
-            print("WebSocket连接已断开")
-    
-    async def listen_for_messages(self):
-        """监听WebSocket消息"""
-        if not self.websocket:
-            return
-            
-        try:
-            async for message in self.websocket:
-                try:
-                    data = json.loads(message)
-                    await self._process_message(data)
-                except json.JSONDecodeError:
-                    print(f"❌ 无法解析WebSocket消息: {message}")
-                except Exception as e:
-                    print(f"❌ 处理WebSocket消息时出错: {e}")
-        except websockets.exceptions.ConnectionClosed:
-            self.connected = False
-            self.connection_status.emit(False, "WebSocket连接已关闭")
-            print("❌ WebSocket连接已关闭")
-        except Exception as e:
-            self.connected = False
-            self.connection_status.emit(False, f"WebSocket监听错误: {e}")
-            print(f"❌ WebSocket监听错误: {e}")
-    
-    async def _process_message(self, data):
-        """处理接收到的消息"""
-        try:
-            msg_type = data.get('type', 'unknown')
-            
-            if msg_type == 'connection_ack':
-                # 连接确认消息
-                message = f"🔗 {data.get('message', '连接确认')}"
-                self.message_received.emit('connection', message)
-                
-            elif msg_type == 'handoff_call':
-                # Handoff调用消息
-                service_name = data.get('data', {}).get('service_name', '未知服务')
-                status = data.get('data', {}).get('status', 'unknown')
-                
-                if status == 'started':
-                    message = f"🚀 开始执行: {service_name}"
-                elif status == 'success':
-                    result = data.get('data', {}).get('result', '')
-                    message = f"✅ {service_name} 执行成功"
-                    if result:
-                        message += f"\n结果: {str(result)[:100]}..."
-                elif status == 'error':
-                    error = data.get('data', {}).get('error', '未知错误')
-                    message = f"❌ {service_name} 执行失败: {error}"
-                else:
-                    message = f"ℹ️ {service_name}: {status}"
-                    
-                self.message_received.emit('handoff', message)
-                
-            elif msg_type == 'tool_execution':
-                # 工具执行消息
-                service_name = data.get('data', {}).get('service_name', '未知服务')
-                tool_name = data.get('data', {}).get('tool_name', '未知工具')
-                status = data.get('data', {}).get('status', 'unknown')
-                
-                if status == 'started':
-                    message = f"🔧 工具调用: {service_name}.{tool_name}"
-                elif status == 'success':
-                    result = data.get('data', {}).get('result', '')
-                    message = f"✅ 工具 {service_name}.{tool_name} 执行成功"
-                    if result:
-                        message += f"\n结果: {str(result)[:100]}..."
-                elif status == 'error':
-                    error = data.get('data', {}).get('error', '未知错误')
-                    message = f"❌ 工具 {service_name}.{tool_name} 执行失败: {error}"
-                else:
-                    message = f"ℹ️ 工具 {service_name}.{tool_name}: {status}"
-                    
-                self.message_received.emit('tool', message)
-                
-            elif msg_type == 'mcp_event':
-                # MCP事件消息
-                event_type = data.get('data', {}).get('event_type', '未知事件')
-                event_data = data.get('data', {}).get('data', {})
-                message = f"📡 MCP事件: {event_type}"
-                if event_data:
-                    message += f"\n数据: {str(event_data)[:100]}..."
-                self.message_received.emit('mcp_event', message)
-                
-            else:
-                # 其他类型的消息
-                message = f"📨 收到消息: {json.dumps(data, ensure_ascii=False, indent=2)}"
-                self.message_received.emit('other', message)
-                
-        except Exception as e:
-            print(f"❌ 处理消息时出错: {e}")
-            self.message_received.emit('error', f"消息处理错误: {e}")
-
-class WebSocketThread(QThread):
-    """WebSocket客户端线程"""
-    
-    message_received = Signal(str, str)  # 消息类型, 消息内容
-    connection_status = Signal(bool, str)  # 连接状态, 状态信息
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.client = WebSocketClient()
-        self.client.message_received.connect(self.message_received.emit)
-        self.client.connection_status.connect(self.connection_status.emit)
-        self.running = False
-        
-    def run(self):
-        """线程运行方法"""
-        self.running = True
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        try:
-            # 连接WebSocket
-            if loop.run_until_complete(self.client.connect()):
-                # 开始监听消息
-                loop.run_until_complete(self.client.listen_for_messages())
-        except Exception as e:
-            print(f"❌ WebSocket线程错误: {e}")
-        finally:
-            loop.run_until_complete(self.client.disconnect())
-            loop.close()
-            self.running = False
-    
-    def stop(self):
-        """停止线程"""
-        self.running = False
-        if self.client.websocket:
-            try:
-                # 使用同步方式关闭WebSocket，避免事件循环问题
-                import asyncio
-                try:
-                    # 尝试在现有事件循环中运行
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # 如果事件循环正在运行，使用call_soon_threadsafe
-                        loop.call_soon_threadsafe(lambda: asyncio.create_task(self.client.disconnect()))
-                    else:
-                        # 如果事件循环没有运行，直接运行
-                        asyncio.run(self.client.disconnect())
-                except RuntimeError:
-                    # 如果没有事件循环，创建一个新的
-                    asyncio.run(self.client.disconnect())
-            except Exception as e:
-                print(f"关闭WebSocket时出错: {e}")
-                # 强制关闭连接
-                try:
-                    self.client.websocket.close()
-                except:
-                    pass
+        # 自动调整字体大小以适应标签大小
+        font = self.font()
+        font_size = min(self.width() // 20, self.height() // 2, 16)
+        font.setPointSize(max(font_size, 8))
+        self.setFont(font)
 
 class ChatWindow(QWidget):
     def __init__(s):
@@ -353,11 +171,6 @@ class ChatWindow(QWidget):
                 border: 1px solid rgba(255, 255, 255, 30);
             }}
         """)
-        
-        # 初始化WebSocket客户端
-        s.websocket_thread = WebSocketThread(s)
-        s.websocket_thread.message_received.connect(s.on_websocket_message)
-        s.websocket_thread.connection_status.connect(s.on_websocket_status)
         
         fontfam,fontbig,fontsize='Lucida Console',16,16
         
@@ -467,7 +280,7 @@ class ChatWindow(QWidget):
         s.img.setMaximumSize(16777215,16777215)
         s.img.setStyleSheet('background:transparent; border: none;')
         stack.addWidget(s.img)
-        nick=QLabel(f"● 娜迦{config.NAGA_VERSION}",s.side)
+        nick=QLabel(f"● 娜迦{config.system.version}",s.side)
         nick.setStyleSheet("""
             QLabel {
                 color: #fff;
@@ -912,11 +725,6 @@ class ChatWindow(QWidget):
         """窗口显示事件"""
         super().showEvent(event)
         
-        # 启动WebSocket客户端
-        if not s.websocket_thread.isRunning():
-            s.websocket_thread.start()
-            print("🚀 WebSocket客户端线程已启动")
-        
         # 其他初始化代码...
         s.setFocus()
         s.input.setFocus()
@@ -928,64 +736,6 @@ class ChatWindow(QWidget):
                 if os.path.exists(p) and not q.isNull():
                     s.img.setPixmap(q.scaled(s.img.width(), s.img.height(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation))
             s._img_inited = True
-
-    def on_websocket_message(s, msg_type, message):
-        """处理WebSocket消息"""
-        try:
-            # 根据消息类型设置不同的样式
-            if msg_type == 'connection':
-                # 连接状态消息 - 使用蓝色
-                formatted_message = f'<div style="color: #4FC3F7; font-style: italic; margin: 5px 0;">{message}</div>'
-            elif msg_type == 'handoff':
-                # Handoff消息 - 使用橙色
-                formatted_message = f'<div style="color: #FF9800; font-weight: bold; margin: 5px 0;">{message}</div>'
-            elif msg_type == 'tool':
-                # 工具执行消息 - 使用绿色
-                formatted_message = f'<div style="color: #4CAF50; font-weight: bold; margin: 5px 0;">{message}</div>'
-            elif msg_type == 'mcp_event':
-                # MCP事件消息 - 使用紫色
-                formatted_message = f'<div style="color: #9C27B0; font-weight: bold; margin: 5px 0;">{message}</div>'
-            elif msg_type == 'error':
-                # 错误消息 - 使用红色
-                formatted_message = f'<div style="color: #F44336; font-weight: bold; margin: 5px 0;">{message}</div>'
-            else:
-                # 其他消息 - 使用灰色
-                formatted_message = f'<div style="color: #9E9E9E; font-style: italic; margin: 5px 0;">{message}</div>'
-            
-            # 添加时间戳
-            timestamp = datetime.datetime.now().strftime('%H:%M:%S')
-            timestamp_html = f'<span style="color: #666; font-size: 12px;">[{timestamp}]</span> '
-            
-            # 将消息添加到聊天历史
-            s.text.append(timestamp_html + formatted_message)
-            
-            # 滚动到底部
-            s.text.verticalScrollBar().setValue(s.text.verticalScrollBar().maximum())
-            
-            print(f"📨 WebSocket消息已显示: {msg_type} - {message}")
-            
-        except Exception as e:
-            print(f"❌ 处理WebSocket消息时出错: {e}")
-    
-    def on_websocket_status(s, connected, status):
-        """处理WebSocket连接状态"""
-        try:
-            # 只在控制台打印，不显示在聊天窗口
-            print(f"🔗 WebSocket状态: {connected} - {status}")
-            return
-        except Exception as e:
-            print(f"❌ 处理WebSocket状态时出错: {e}")
-
-    def closeEvent(s, event):
-        """窗口关闭事件"""
-        # 停止WebSocket线程
-        if s.websocket_thread.isRunning():
-            s.websocket_thread.stop()
-            s.websocket_thread.wait(3000)  # 等待最多3秒
-            print("🛑 WebSocket客户端线程已停止")
-        
-        # 调用父类的closeEvent
-        super().closeEvent(event)
 
 if __name__=="__main__":
     app = QApplication(sys.argv)

@@ -259,7 +259,7 @@ class AgentAPIServer:
             return web.Response(body=response_data, status=response.status)
     
     def _parse_tool_calls(self, content: str) -> List[Dict]:
-        """解析工具调用"""
+        """解析工具调用，支持MCP和Agent两种类型"""
         tool_calls = []
         
         tool_request_start = "<<<[TOOL_REQUEST]>>>"
@@ -279,24 +279,49 @@ class AgentAPIServer:
             # 提取工具调用内容
             tool_content = content[start_pos + len(tool_request_start):end_pos].strip()
             
-            # 解析参数
-            tool_name = None
+            # 先解析所有参数
             tool_args = {}
-            
             param_pattern = r'(\w+)\s*:\s*「始」([\s\S]*?)「末」'
             for match in re.finditer(param_pattern, tool_content):
                 key = match.group(1)
                 value = match.group(2).strip()
-                if key == 'tool_name':
-                    tool_name = value
-                else:
-                    tool_args[key] = value
+                tool_args[key] = value
             
-            if tool_name:
-                tool_calls.append({
-                    'name': tool_name,
-                    'args': tool_args
-                })
+            # 判断调用类型
+            agent_type = tool_args.get('agentType', 'mcp').lower()
+            
+            if agent_type == 'agent':
+                # Agent类型调用格式
+                agent_name = tool_args.get('agent_name')
+                prompt = tool_args.get('prompt')
+                if agent_name and prompt:
+                    tool_calls.append({
+                        'name': 'agent_call',
+                        'args': {
+                            'agentType': 'agent',
+                            'agent_name': agent_name,
+                            'prompt': prompt
+                        }
+                    })
+            else:
+                # MCP类型调用格式（包括默认mcp和旧格式）
+                tool_name = tool_args.get('tool_name')
+                if tool_name:
+                    # 新格式：有service_name
+                    if 'service_name' in tool_args:
+                        tool_calls.append({
+                            'name': tool_name,
+                            'args': tool_args
+                        })
+                    else:
+                        # 旧格式：tool_name作为服务名
+                        service_name = tool_name
+                        tool_args['service_name'] = service_name
+                        tool_args['agentType'] = 'mcp'
+                        tool_calls.append({
+                            'name': tool_name,
+                            'args': tool_args
+                        })
             
             start_index = end_pos + len(tool_request_end)
         
@@ -308,9 +333,37 @@ class AgentAPIServer:
         
         for tool_call in tool_calls:
             try:
-                # 这里应该调用实际的工具执行逻辑
-                # 暂时返回模拟结果
-                result = f"来自工具 \"{tool_call['name']}\" 的结果:\n[工具执行结果]"
+                tool_name = tool_call['name']
+                args = tool_call['args']
+                agent_type = args.get('agentType', 'mcp').lower()
+                
+                # 根据agentType分流处理
+                if agent_type == 'agent':
+                    # Agent类型：交给AgentManager处理
+                    try:
+                        from mcpserver.agent_manager import get_agent_manager
+                        agent_manager = get_agent_manager()
+                        
+                        agent_name = args.get('agent_name')
+                        prompt = args.get('prompt')
+                        
+                        if not agent_name or not prompt:
+                            result = "Agent调用失败: 缺少agent_name或prompt参数"
+                        else:
+                            # 直接调用Agent
+                            result = await agent_manager.call_agent(agent_name, prompt)
+                            if result.get("status") == "success":
+                                result = result.get("result", "")
+                            else:
+                                result = f"Agent调用失败: {result.get('error', '未知错误')}"
+                                
+                    except Exception as e:
+                        result = f"Agent调用失败: {str(e)}"
+                        
+                else:
+                    # MCP类型：暂时返回模拟结果
+                    result = f"来自工具 \"{tool_name}\" 的结果:\n[工具执行结果]"
+                
                 results.append(result)
             except Exception as e:
                 error_result = f"执行工具 {tool_call['name']} 时发生错误：{str(e)}"
