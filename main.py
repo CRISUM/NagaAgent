@@ -3,6 +3,12 @@ import os
 import sys
 import threading
 import time
+import logging
+
+# 在导入其他模块前先设置HTTP库日志级别
+logging.getLogger("httpcore.http11").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore.connection").setLevel(logging.WARNING)
 
 from conversation_core import NagaConversation
 
@@ -13,22 +19,8 @@ from PyQt5.QtWidgets import QApplication
 # 导入配置
 from config import config
 from summer_memory.memory_manager import memory_manager
-<<<<<<< HEAD
-
-# 导入API服务器配置
-from config import (
-    API_SERVER_ENABLED, 
-    API_SERVER_AUTO_START, 
-    API_SERVER_HOST, 
-    API_SERVER_PORT,
-    TTS_PORT
-)
-
-# 新增：导入应用预加载
-from mcpserver.agent_open_launcher.app_cache import preload_apps, get_cached_apps
-=======
 from ui.pyqt_chat_window import ChatWindow
->>>>>>> 8ef12f3ea0ad0b30e4c7855137f8b013161007a6
+
 n=NagaConversation()
 def show_help():print('系统命令: 清屏, 查看索引, 帮助, 退出')
 def show_index():print('主题分片索引已集成，无需单独索引查看')
@@ -87,8 +79,6 @@ def start_api_server():
     except Exception as e:
         print(f"❌ API服务器启动异常: {e}")
 
-
-
 with open('./ui/progress.txt','w')as f:
     f.write('0')
 mm = memory_manager
@@ -126,11 +116,7 @@ def start_tts_server():
                 start_http_server()
             except Exception as e:
                 print(f"❌ TTS服务启动失败: {e}")
-
-            # from voice.start_voice_service import start_http_server
-            # start_http_server()
-
-            #print(f"❌ TTS服务启动失败: {e}")            
+        
         tts_thread = threading.Thread(target=run_tts, daemon=True)
         tts_thread.start()
         print("✅ TTS服务已在后台启动")
@@ -139,7 +125,6 @@ def start_tts_server():
         print(f"❌ TTS服务启动异常: {e}")
 
 # 自动启动TTS服务
-
 start_tts_server()
 
 show_help()

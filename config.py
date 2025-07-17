@@ -60,13 +60,6 @@ class SystemConfig(BaseModel):
         return v.upper()
 
 
-<<<<<<< HEAD
-# API与服务配置
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-placeholder-key-not-set") # 从环境变量获取API密钥
-DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
-MODEL_NAME = DEEPSEEK_MODEL  # 统一模型名称 #
-=======
 class APIConfig(BaseModel):
     """API服务配置"""
     api_key: str = Field(default="sk-placeholder-key-not-set", description="API密钥")
@@ -79,7 +72,6 @@ class APIConfig(BaseModel):
     top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="Top-p采样参数")
     timeout: Optional[int] = Field(default=None, ge=1, le=300, description="请求超时时间")
     retry_count: Optional[int] = Field(default=None, ge=0, le=10, description="重试次数")
->>>>>>> 8ef12f3ea0ad0b30e4c7855137f8b013161007a6
 
     @field_validator('api_key')
     @classmethod
@@ -108,8 +100,8 @@ class APIServerConfig(BaseModel):
 
 class GRAGConfig(BaseModel):
     """GRAG知识图谱记忆系统配置"""
-    enabled: bool = Field(default=True, description="是否启用GRAG记忆系统")
-    auto_extract: bool = Field(default=True, description="是否自动提取对话中的三元组")
+    enabled: bool = Field(default=False, description="是否启用GRAG记忆系统")  # 关闭GRAG记忆系统
+    auto_extract: bool = Field(default=False, description="是否自动提取对话中的三元组")  # 关闭三元组提取
     context_length: int = Field(default=5, ge=1, le=20, description="记忆上下文长度")
     similarity_threshold: float = Field(default=0.6, ge=0.0, le=1.0, description="记忆检索相似度阈值")
     neo4j_uri: str = Field(default="neo4j://127.0.0.1:7687", description="Neo4j连接URI")
@@ -165,6 +157,20 @@ class BrowserConfig(BaseModel):
     """浏览器配置"""
     path: Optional[str] = Field(default=None, description="浏览器可执行文件路径")
     playwright_headless: bool = Field(default=False, description="Playwright浏览器是否无头模式")
+    
+    # Edge浏览器相关配置
+    edge_lnk_path: str = Field(
+        default=r'C:\Users\DREEM\Desktop\Microsoft Edge.lnk',
+        description="Edge浏览器快捷方式路径"
+    )
+    edge_common_paths: List[str] = Field(
+        default=[
+            r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
+            r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
+            os.path.expanduser(r'~\AppData\Local\Microsoft\Edge\Application\msedge.exe')
+        ],
+        description="Edge浏览器常见安装路径"
+    )
 
     @field_validator('path', mode='before')
     @classmethod
@@ -211,28 +217,18 @@ class TTSConfig(BaseModel):
     """TTS服务配置"""
     api_key: str = Field(default="your_api_key_here", description="TTS服务API密钥")
     port: int = Field(default=5050, ge=1, le=65535, description="TTS服务端口")
-    default_voice: str = Field(default="zh-CN-XiaoxiaoNeural", description="默认语音")
+    default_voice: str = Field(default="en-US-AvaNeural", description="默认语音")
     default_format: str = Field(default="mp3", description="默认音频格式")
     default_speed: float = Field(default=1.0, ge=0.1, le=3.0, description="默认语速")
-    default_language: str = Field(default="zh-CN", description="默认语言")
+    default_language: str = Field(default="en-US", description="默认语言")
     remove_filter: bool = Field(default=False, description="是否移除过滤")
     expand_api: bool = Field(default=True, description="是否扩展API")
     require_api_key: bool = Field(default=True, description="是否需要API密钥")
-    
-    # TTS提供商配置
-    provider: str = Field(default="edge-tts", description="TTS提供商: edge-tts 或 minimax")
-    
-    # Minimax配置
-    minimax_api_key: str = Field(default="", description="Minimax API密钥")
-    group_id: str = Field(default="", description="Minimax Group ID")
-    tts_model: str = Field(default="speech-02-hd", description="Minimax模型")
-    default_voice: str = Field(default="male-qn-qingse", description="Minimax语音ID")
-    emotion: str = Field(default="happy", description="Minimax情感")
 
 
 class QuickModelConfig(BaseModel):
     """快速响应小模型配置"""
-    enabled: bool = Field(default=False, description="是否启用小模型")
+    enabled: bool = Field(default=False, description="是否启用小模型")  # 关闭小模型
     api_key: str = Field(default="", description="小模型API密钥")
     base_url: str = Field(default="", description="小模型API地址")
     model_name: str = Field(default="qwen2.5-1.5b-instruct", description="小模型名称")
@@ -241,13 +237,13 @@ class QuickModelConfig(BaseModel):
     timeout: int = Field(default=5, ge=1, le=60, description="快速响应超时时间")
     max_retries: int = Field(default=2, ge=0, le=5, description="最大重试次数")
 
-    # 功能开关
-    quick_decision_enabled: bool = Field(default=True, description="快速决策功能")
-    json_format_enabled: bool = Field(default=True, description="JSON格式化功能")
-    output_filter_enabled: bool = Field(default=True, description="输出内容过滤功能")
-    difficulty_judgment_enabled: bool = Field(default=True, description="问题难度判断功能")
-    scoring_system_enabled: bool = Field(default=True, description="黑白名单打分系统")
-    thinking_completeness_enabled: bool = Field(default=True, description="思考完整性判断功能")
+    # 功能开关 - 全部关闭
+    quick_decision_enabled: bool = Field(default=False, description="快速决策功能")  # 关闭
+    json_format_enabled: bool = Field(default=False, description="JSON格式化功能")  # 关闭
+    output_filter_enabled: bool = Field(default=False, description="输出内容过滤功能")  # 关闭
+    difficulty_judgment_enabled: bool = Field(default=False, description="问题难度判断功能")  # 关闭
+    scoring_system_enabled: bool = Field(default=False, description="黑白名单打分系统")  # 关闭
+    thinking_completeness_enabled: bool = Field(default=False, description="思考完整性判断功能")  # 关闭
 
 
 class FilterConfig(BaseModel):
@@ -267,8 +263,8 @@ class FilterConfig(BaseModel):
 
 class DifficultyConfig(BaseModel):
     """问题难度判断配置"""
-    enabled: bool = Field(default=True, description="是否启用难度判断")
-    use_small_model: bool = Field(default=True, description="使用小模型进行难度判断")
+    enabled: bool = Field(default=False, description="是否启用难度判断")  # 关闭难度判断
+    use_small_model: bool = Field(default=False, description="使用小模型进行难度判断")
     difficulty_levels: List[str] = Field(
         default=["简单", "中等", "困难", "极难"],
         description="难度级别"
@@ -284,7 +280,7 @@ class DifficultyConfig(BaseModel):
 
 class ScoringConfig(BaseModel):
     """黑白名单打分系统配置"""
-    enabled: bool = Field(default=True, description="是否启用打分系统")
+    enabled: bool = Field(default=False, description="是否启用打分系统")  # 关闭打分系统
     score_range: List[int] = Field(default=[1, 5], description="评分范围")
     score_threshold: int = Field(default=2, ge=1, le=5, description="结果保留阈值")
     similarity_threshold: float = Field(default=0.85, ge=0.0, le=1.0, description="相似结果识别阈值")
@@ -300,15 +296,15 @@ class ScoringConfig(BaseModel):
 
 class ThinkingConfig(BaseModel):
     """思考完整性判断配置"""
-    enabled: bool = Field(default=True, description="是否启用思考完整性判断")
-    use_small_model: bool = Field(default=True, description="使用小模型判断思考完整性")
+    enabled: bool = Field(default=False, description="是否启用思考完整性判断")  # 关闭思考完整性判断
+    use_small_model: bool = Field(default=False, description="使用小模型判断思考完整性")
     completeness_criteria: List[str] = Field(
         default=["问题分析充分", "解决方案明确", "逻辑链条完整", "结论清晰合理"],
         description="完整性评估标准"
     )
     completeness_threshold: float = Field(default=0.8, ge=0.0, le=1.0, description="完整性阈值")
     max_thinking_depth: int = Field(default=5, ge=1, le=10, description="最大思考深度层级")
-    next_question_generation: bool = Field(default=True, description="生成下一级问题")
+    next_question_generation: bool = Field(default=False, description="生成下一级问题")  # 关闭下一级问题生成
 
 
 class UIConfig(BaseModel):
@@ -344,18 +340,16 @@ class SystemPrompts(BaseModel):
 2. 使用简单标点（逗号，句号，问号）传达语气
 3. 禁止使用括号()或其他符号表达状态、语气或动作
 
-不调用工具，直接回复message字段内容即可。
 
 【工具调用格式要求】
-如需调用某个工具，请严格使用如下格式输出（可多次出现）：
+如需调用某个工具，直接严格输出下面的格式（可多次出现）：
 
 **MCP服务调用格式：**
 <<<[TOOL_REQUEST]>>>
 agentType: 「始」mcp「末」
 service_name: 「始」MCP服务名称「末」
-tool_name: 「始」使用工具「末」
-param1: 「始」参数值1「末」
-param2: 「始」参数值2「末」
+tool_name: 「始」工具名称「末」
+参数名: 「始」参数值「末」
 <<<[END_TOOL_REQUEST]>>>
 
 **Agent服务调用格式：**
@@ -379,6 +373,7 @@ Agent服务：
 - MCP服务：使用service_name和tool_name，支持多个参数
 - Agent服务：使用agent_name和prompt，prompt为本次任务内容
 - 服务名称：使用英文服务名（如AppLauncherAgent）作为service_name或agent_name
+- 当用户请求需要执行具体操作时，优先使用工具调用而不是直接回答
 
 
 """,
@@ -616,9 +611,6 @@ SHOW_handoff_OUTPUT = config.handoff.show_output
 BROWSER_PATH = config.browser.path
 PLAYWRIGHT_HEADLESS = config.browser.playwright_headless
 
-# TTS 配置兼容性映射 - 直接暴露 tts 对象给旧代码使用
-tts = config.tts
-
 TTS_API_KEY = config.tts.api_key
 TTS_PORT = config.tts.port
 TTS_DEFAULT_VOICE = config.tts.default_voice
@@ -690,3 +682,7 @@ if config.system.debug:
     print(f"API服务器: {'启用' if config.api_server.enabled else '禁用'} ({config.api_server.host}:{config.api_server.port})")
     print(f"GRAG记忆系统: {'启用' if config.grag.enabled else '禁用'}")
     print(f"快速模型: {'启用' if config.quick_model.enabled else '禁用'}")
+
+# Edge浏览器相关全局变量
+EDGE_LNK_PATH = config.browser.edge_lnk_path
+EDGE_COMMON_PATHS = config.browser.edge_common_paths

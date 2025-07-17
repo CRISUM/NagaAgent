@@ -29,6 +29,9 @@ from config import (
 
 logger = logging.getLogger("QuickModelManager")
 
+# 全局变量保护机制，避免重复初始化
+_QUICK_MODEL_MANAGER_GLOBAL_INITIALIZED = False
+
 class QuickModelManager:
     """快速响应小模型管理器"""
     
@@ -44,7 +47,11 @@ class QuickModelManager:
                     api_key=self.config["api_key"],
                     base_url=self.config["base_url"].rstrip('/') + '/'
                 )
-                logger.info(f"快速模型初始化成功: {self.config['model_name']}")
+                # 只在首次初始化时输出日志
+                global _QUICK_MODEL_MANAGER_GLOBAL_INITIALIZED
+                if not _QUICK_MODEL_MANAGER_GLOBAL_INITIALIZED:
+                    logger.info(f"快速模型初始化成功: {self.config['model_name']}")
+                    _QUICK_MODEL_MANAGER_GLOBAL_INITIALIZED = True
             except Exception as e:
                 logger.warning(f"快速模型初始化失败: {e}")
                 self.enabled = False
@@ -110,7 +117,10 @@ class QuickModelManager:
 【重要】：只输出最终结果，不要包含思考过程或<think>标签。"""
         }
         
-        logger.info(f"快速模型管理器初始化 - 启用状态: {self.enabled}")
+        # 只在首次初始化时输出日志
+        if not _QUICK_MODEL_MANAGER_GLOBAL_INITIALIZED:
+            logger.info(f"快速模型管理器初始化 - 启用状态: {self.enabled}")
+            _QUICK_MODEL_MANAGER_GLOBAL_INITIALIZED = True
     
     def _filter_output(self, output: str) -> str:
         """过滤输出内容，移除<think>等标签内容"""

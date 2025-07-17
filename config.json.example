@@ -1,0 +1,49 @@
+{
+  // 系统基础配置
+  "system": {
+    "version": "3.0",                    // 系统版本号
+    "voice_enabled": true,               // 是否启用语音功能
+    "stream_mode": true,                 // 是否启用流式输出
+    "debug": false,                      // 是否启用调试模式
+    "log_level": "WARNING"               // 日志级别：DEBUG/INFO/WARNING/ERROR
+  },
+
+  // LLM API配置
+  "api": {
+    "api_key": "sk-xxx",                 // LLM API密钥
+    "base_url": "https://api.deepseek.com/v1", // LLM API基础URL
+    "model": "deepseek-chat",            // 使用的模型名称
+    "temperature": 0.7,                  // 温度参数
+    "max_tokens": 2000                   // 最大输出token数
+  },
+
+  // GRAG知识图谱配置
+  "grag": {
+    "enabled": true,                     // 是否启用GRAG记忆系统
+    "auto_extract": true,                // 是否自动提取三元组
+    "context_length": 5,                 // 上下文长度
+    "similarity_threshold": 0.6,         // 相似度阈值
+    "neo4j_uri": "bolt://localhost:7687", // Neo4j数据库URI
+    "neo4j_user": "neo4j",               // Neo4j用户名
+    "neo4j_password": "naga123456",      // Neo4j密码
+    "neo4j_database": "neo4j"            // Neo4j数据库名
+  },
+
+  // MQTT设备开关控制配置
+  "mqtt": {
+    "enabled": false,                    // 是否启用MQTT功能
+    "broker": "broker.emqx.io",          // MQTT服务器地址
+    "port": 1883,                        // MQTT服务器端口
+    "topic": "device/switch",            // 设备控制主题
+    "client_id": "mcp_device_switch",    // MQTT客户端ID
+    "username": "",                      // MQTT用户名（可选）
+    "password": ""                       // MQTT密码（可选）
+  },
+
+  // Handoff配置
+  "handoff": {
+    "enabled": true,                     // 是否启用Handoff功能
+    "timeout": 15000,                    // Handoff超时时间（毫秒）
+    "max_loop_stream": 5                 // 最大流式循环次数
+  }
+}

@@ -96,12 +96,6 @@
 python check_env.py
 ```
 
-### 依赖清理（可选）
-如果之前安装过faiss相关依赖，可以运行清理脚本：
-```bash
-python cleanup_dependencies.py
-```
-
 ---
 
 ## ⚙️ 配置说明
@@ -209,10 +203,6 @@ NagaAgent/
 ├── setup_mac.sh                # Mac配置脚本
 ├── quick_deploy_mac.sh         # Mac一键部署脚本
 ├── check_env.py                # 跨平台环境检查
-<<<<<<< HEAD
-├── cleanup_dependencies.py     # 依赖清理脚本
-=======
->>>>>>> 8ef12f3ea0ad0b30e4c7855137f8b013161007a6
 ├── summer_memory/              # GRAG知识图谱记忆系统
 │   ├── memory_manager.py       # 记忆管理器
 │   ├── extractor_ds_tri.py     # 三元组提取器
@@ -868,8 +858,6 @@ MODEL_PROVIDERS = {
 - 浏览器无法启动，检查playwright安装与网络
 - 主题树/索引/参数/密钥全部在`config.py`统一管理
 - 聊天输入`#devmode`进入开发者模式，后续对话不写入GRAG记忆，仅用于工具调用测试
-<<<<<<< HEAD
-=======
 
 ### AgentManager问题
 - **Agent配置加载失败**：检查`agent_configs/`目录下的JSON文件格式是否正确
@@ -897,7 +885,6 @@ MODEL_PROVIDERS = {
 2. **输入验证**：对用户输入进行验证和清理
 3. **错误处理**：避免在错误信息中泄露敏感信息
 4. **访问控制**：实现适当的访问控制机制
->>>>>>> 8ef12f3ea0ad0b30e4c7855137f8b013161007a6
 
 ---
 
@@ -1036,17 +1023,10 @@ GET /memory/stats
   - 支持多agent协作，ControllerAgent可智能分配任务给BrowserAgent、ContentAgent等
   - 注册中心`mcp_registry.py`自动发现并注册所有实现了`handle_handoff`的Agent实例，支持热插拔
   - 注册时自动输出所有已注册agent的名称和说明，便于调试
-<<<<<<< HEAD
-=======
   - 简化Agent类型：只支持`mcp`和`agent`两种类型
->>>>>>> 8ef12f3ea0ad0b30e4c7855137f8b013161007a6
 
 - handoff机制全部通过`handle_handoff`异步方法调度，兼容TOOL_REQUEST和handoff两种格式
 
 - 新增/删除agent只需增删py文件，无需重启主程序
 
-<<<<<<< HEAD
 - 详细接口和参数请参考各Agent代码注释与`config.py`配置 
-=======
-- 详细接口和参数请参考各Agent代码注释与`config.py`配置 
->>>>>>> 8ef12f3ea0ad0b30e4c7855137f8b013161007a6

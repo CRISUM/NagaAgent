@@ -10,8 +10,14 @@ import sys
 import traceback
 import re
 import os
+import logging
 from contextlib import asynccontextmanager
 from typing import Dict, List, Optional, AsyncGenerator
+
+# 在导入其他模块前先设置HTTP库日志级别
+logging.getLogger("httpcore.http11").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore.connection").setLevel(logging.WARNING)
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
@@ -516,10 +522,10 @@ def parse_tool_calls(content: str) -> list:
                         'prompt': prompt
                     }
                 })
-        else:
+            else:
             # MCP类型调用格式（包括默认mcp和旧格式）
-            tool_name = tool_args.get('tool_name')
-            if tool_name:
+                tool_name = tool_args.get('tool_name')
+        if tool_name:
                 # 新格式：有service_name
                 if 'service_name' in tool_args:
                     tool_calls.append({
@@ -574,10 +580,10 @@ async def execute_tool_calls(tool_calls: list, mcp_manager) -> str:
             else:
                 # MCP类型：走handoff流程
                 service_name = args.get('service_name', tool_name)
-                result = await mcp_manager.handoff(
+            result = await mcp_manager.handoff(
                     service_name=service_name,
                     task=args
-                )
+            )
             
             results.append(f"来自工具 \"{tool_name}\" 的结果:\n{result}")
         except Exception as e:

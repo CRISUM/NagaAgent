@@ -1,4 +1,4 @@
-import json
+import json as _json
 from py2neo import Graph, Node, Relationship
 import logging
 import sys
@@ -7,35 +7,44 @@ import os
 # 添加项目根目录到路径，以便导入config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
+# 优先从config.json读取Neo4j配置
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
+GRAG_ENABLED = False
 try:
-    from config import GRAG_NEO4J_URI, GRAG_NEO4J_USER, GRAG_NEO4J_PASSWORD, GRAG_NEO4J_DATABASE, GRAG_ENABLED
-    NEO4J_URI = GRAG_NEO4J_URI
-    NEO4J_USER = GRAG_NEO4J_USER
-    NEO4J_PASSWORD = GRAG_NEO4J_PASSWORD
-    NEO4J_DATABASE = GRAG_NEO4J_DATABASE
-except ImportError:
-    # 如果无法导入config，使用环境变量作为备选
-    NEO4J_URI = os.getenv("GRAG_NEO4J_URI", "bolt://localhost:7687")
-    NEO4J_USER = os.getenv("GRAG_NEO4J_USER", "neo4j")
-    NEO4J_PASSWORD = os.getenv("GRAG_NEO4J_PASSWORD", "hkm27iar")
-    NEO4J_DATABASE = os.getenv("GRAG_NEO4J_DATABASE", "testnaga")
+    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+        _cfg = _json.load(f)
+    grag_cfg = _cfg.get('grag', {})
+    NEO4J_URI = grag_cfg['neo4j_uri']
+    NEO4J_USER = grag_cfg['neo4j_user']
+    NEO4J_PASSWORD = grag_cfg['neo4j_password']
+    NEO4J_DATABASE = grag_cfg['neo4j_database']
+    GRAG_ENABLED = grag_cfg.get('enabled', True)
+    try:
+        graph = Graph(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD), name=NEO4J_DATABASE) if GRAG_ENABLED else None
+    except Exception as e:
+        print(f"[GRAG] Neo4j连接失败: {e}", file=sys.stderr)
+        graph = None
+        GRAG_ENABLED = False
+except Exception as e:
+    print(f"[GRAG] 无法从 config.json 读取Neo4j配置: {e}", file=sys.stderr)
+    graph = None
+    GRAG_ENABLED = False
 
 logger = logging.getLogger(__name__)
-graph = Graph(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD), name=NEO4J_DATABASE) if GRAG_ENABLED else None
 TRIPLES_FILE = "triples.json"
 
 
 def load_triples():
     try:
         with open(TRIPLES_FILE, 'r', encoding='utf-8') as f:
-            return set(tuple(t) for t in json.load(f))
+            return set(tuple(t) for t in _json.load(f))
     except FileNotFoundError:
         return set()
 
 
 def save_triples(triples):
     with open(TRIPLES_FILE, 'w', encoding='utf-8') as f:
-        json.dump(list(triples), f, ensure_ascii=False, indent=2)
+        _json.dump(list(triples), f, ensure_ascii=False, indent=2)
 
 
 def store_triples(new_triples):

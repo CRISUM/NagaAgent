@@ -32,23 +32,16 @@ class GRAGMemoryManager:
             self.enabled = False
     
     async def add_conversation_memory(self, user_input: str, ai_response: str) -> bool:
-        """添加对话记忆到知识图谱"""
+        """添加对话记忆到知识图谱（仅写入三元组，不影响主对话历史）"""
         if not self.enabled:
             return False
-            
         try:
-            # 更新上下文
+            # 只拼接本轮内容，不写入recent_context
             conversation_text = f"用户: {user_input}\n娜迦: {ai_response}"
-            self.recent_context.append(conversation_text)
-            
-            # 保持上下文长度
-            if len(self.recent_context) > self.context_length:
-                self.recent_context = self.recent_context[-self.context_length:]
-            
-            # 自动提取三元组
+            # 仅用于三元组提取和写入，不存储到self.recent_context
             if self.auto_extract:
-                await self._extract_and_store_triples(conversation_text)
-            
+                # 启动异步任务，不阻塞主流程
+                asyncio.create_task(self._extract_and_store_triples(conversation_text))
             return True
         except Exception as e:
             logger.error(f"添加对话记忆失败: {e}")

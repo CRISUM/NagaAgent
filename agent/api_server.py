@@ -285,7 +285,7 @@ class AgentAPIServer:
             for match in re.finditer(param_pattern, tool_content):
                 key = match.group(1)
                 value = match.group(2).strip()
-                tool_args[key] = value
+                    tool_args[key] = value
             
             # 判断调用类型
             agent_type = tool_args.get('agentType', 'mcp').lower()
@@ -306,7 +306,7 @@ class AgentAPIServer:
             else:
                 # MCP类型调用格式（包括默认mcp和旧格式）
                 tool_name = tool_args.get('tool_name')
-                if tool_name:
+            if tool_name:
                     # 新格式：有service_name
                     if 'service_name' in tool_args:
                         tool_calls.append({
@@ -318,10 +318,10 @@ class AgentAPIServer:
                         service_name = tool_name
                         tool_args['service_name'] = service_name
                         tool_args['agentType'] = 'mcp'
-                        tool_calls.append({
-                            'name': tool_name,
-                            'args': tool_args
-                        })
+                tool_calls.append({
+                    'name': tool_name,
+                    'args': tool_args
+                })
             
             start_index = end_pos + len(tool_request_end)
         
