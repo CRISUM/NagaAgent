@@ -1,5 +1,3 @@
-[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/xxiii8322766509-nagaagent-badge.png)](https://mseep.ai/app/xxiii8322766509-nagaagent)
-
 # NagaAgent 3.0
 
 > 智能对话助手，支持多MCP服务、流式语音交互、GRAG知识图谱记忆系统、RESTful API接口、极致精简代码风格。
@@ -1026,6 +1024,7 @@ GET /memory/stats
   - 注册中心`mcp_registry.py`自动发现并注册所有实现了`handle_handoff`的Agent实例，支持热插拔
   - 注册时自动输出所有已注册agent的名称和说明，便于调试
   - 简化Agent类型：只支持`mcp`和`agent`两种类型
+  - [![MseeP.ai Security Assessment Badge](https://mseep.net/pr/xxiii8322766509-nagaagent-badge.png)](https://mseep.ai/app/xxiii8322766509-nagaagent)
 
 - handoff机制全部通过`handle_handoff`异步方法调度，兼容TOOL_REQUEST和handoff两种格式
 
